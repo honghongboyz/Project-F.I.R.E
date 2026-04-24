@@ -465,6 +465,21 @@ def months_to_retirement(
 
 
 # ─────────────────────────────────────────────
+# LOAD SAVED SETTINGS FROM URL QUERY PARAMS
+# ─────────────────────────────────────────────
+def qp_int(key, default):
+    try:    return int(st.query_params[key])
+    except: return default
+
+def qp_float(key, default):
+    try:    return float(st.query_params[key])
+    except: return default
+
+def qp_date(key, default):
+    try:    return date.fromisoformat(st.query_params[key])
+    except: return default
+
+# ─────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
@@ -480,42 +495,63 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown("### 📊 持股數量")
-    shares_006208 = st.number_input("006208 持股 (股)", min_value=0, value=10000, step=100, key="s1")
-    shares_00631L = st.number_input("00631L 持股 (股)", min_value=0, value=5000, step=100, key="s2")
-    shares_2330   = st.number_input("2330 持股 (股)",   min_value=0, value=200,   step=10,  key="s3")
+    shares_006208 = st.number_input("006208 持股 (股)", min_value=0, value=qp_int("s1", 10000), step=100, key="s1")
+    shares_00631L = st.number_input("00631L 持股 (股)", min_value=0, value=qp_int("s2", 5000),  step=100, key="s2")
+    shares_2330   = st.number_input("2330 持股 (股)",   min_value=0, value=qp_int("s3", 200),    step=10,  key="s3")
 
     st.markdown("### 🏦 質押條件")
     pledge_loan = st.number_input(
-        "質押借款總額 (TWD)", min_value=0, value=1_500_000, step=10_000,
+        "質押借款總額 (TWD)", min_value=0,
+        value=qp_int("pl", 1_500_000), step=10_000,
         help="目前向券商借出的總金額"
     )
     pledge_rate = st.number_input(
-        "質押年利率 (%)", min_value=0.0, value=2.4, step=0.1, format="%.2f"
+        "質押年利率 (%)", min_value=0.0,
+        value=qp_float("pr", 2.4), step=0.1, format="%.2f"
     )
     pledge_expiry = st.date_input(
         "借款到期日",
-        value=date.today() + timedelta(days=180),
+        value=qp_date("pe", date.today() + timedelta(days=180)),
         min_value=date.today(),
     )
 
     st.markdown("### 🎯 退休目標")
     target_net = st.number_input(
-        "目標淨資產 (TWD)", min_value=1_000_000, value=30_000_000, step=500_000
+        "目標淨資產 (TWD)", min_value=1_000_000,
+        value=qp_int("tn", 30_000_000), step=500_000
     )
     monthly_invest = st.number_input(
-        "每月定額投入 (TWD)", min_value=0, value=30_000, step=1_000
+        "每月定額投入 (TWD)", min_value=0,
+        value=qp_int("mi", 30_000), step=1_000
     )
     withdrawal_rate = st.number_input(
-        "安全提領率 (%)", min_value=1.0, max_value=10.0, value=4.0, step=0.1, format="%.1f"
+        "安全提領率 (%)", min_value=1.0, max_value=10.0,
+        value=qp_float("wr", 4.0), step=0.1, format="%.1f"
     )
     dob = st.date_input(
         "出生年月日",
-        value=date(1992, 12, 14),
+        value=qp_date("dob", date(1992, 12, 14)),
         min_value=date(1950, 1, 1),
         max_value=date.today() - timedelta(days=365*18),
     )
 
     st.markdown("---")
+
+    if st.button("💾  儲存設定到書籤", use_container_width=True):
+        st.query_params.update({
+            "s1":  str(shares_006208),
+            "s2":  str(shares_00631L),
+            "s3":  str(shares_2330),
+            "pl":  str(pledge_loan),
+            "pr":  str(pledge_rate),
+            "pe":  pledge_expiry.isoformat(),
+            "tn":  str(target_net),
+            "mi":  str(monthly_invest),
+            "wr":  str(withdrawal_rate),
+            "dob": dob.isoformat(),
+        })
+        st.success("✅ 已儲存！請將目前網址加入書籤")
+
     refresh_btn = st.button("⟳  REFRESH PRICES", use_container_width=True)
 
 
