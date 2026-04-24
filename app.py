@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_cookies_controller import CookieController
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -465,54 +466,26 @@ def months_to_retirement(
 
 
 # ─────────────────────────────────────────────
-# PERSISTENT SETTINGS VIA LOCALSTORAGE + QUERY PARAMS
-# Priority: query_params > localStorage > hardcoded defaults
+# PERSISTENT SETTINGS VIA COOKIES
 # ─────────────────────────────────────────────
+_cookies = CookieController()
 
-# Inject JS to read localStorage and push values into URL on first load
-st.components.v1.html("""
-<script>
-(function() {
-    // Only run in the top frame
-    if (window.self !== window.top) return;
-
-    const KEYS = ["s1","s2","s3","pl","pr","pe","tn","mi","wr","dob"];
-    const url = new URL(window.location.href);
-    let changed = false;
-
-    // If URL already has our params, save them to localStorage (user just saved)
-    let hasAll = KEYS.every(k => url.searchParams.has(k));
-    if (hasAll) {
-        KEYS.forEach(k => localStorage.setItem("fire_" + k, url.searchParams.get(k)));
-        return;
-    }
-
-    // Otherwise load from localStorage and inject into URL
-    KEYS.forEach(k => {
-        const v = localStorage.getItem("fire_" + k);
-        if (v !== null && !url.searchParams.has(k)) {
-            url.searchParams.set(k, v);
-            changed = true;
-        }
-    });
-
-    if (changed) {
-        window.location.replace(url.toString());
-    }
-})();
-</script>
-""", height=0)
-
-def qp_int(key, default):
-    try:    return int(st.query_params[key])
+def ck_int(key, default):
+    try:
+        v = _cookies.get("fire_" + key)
+        return int(v) if v is not None else default
     except: return default
 
-def qp_float(key, default):
-    try:    return float(st.query_params[key])
+def ck_float(key, default):
+    try:
+        v = _cookies.get("fire_" + key)
+        return float(v) if v is not None else default
     except: return default
 
-def qp_date(key, default):
-    try:    return date.fromisoformat(st.query_params[key])
+def ck_date(key, default):
+    try:
+        v = _cookies.get("fire_" + key)
+        return date.fromisoformat(v) if v is not None else default
     except: return default
 
 # ─────────────────────────────────────────────
@@ -531,42 +504,42 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown("### 📊 持股數量")
-    shares_006208 = st.number_input("006208 持股 (股)", min_value=0, value=qp_int("s1", 10000), step=100, key="s1")
-    shares_00631L = st.number_input("00631L 持股 (股)", min_value=0, value=qp_int("s2", 5000),  step=100, key="s2")
-    shares_2330   = st.number_input("2330 持股 (股)",   min_value=0, value=qp_int("s3", 200),    step=10,  key="s3")
+    shares_006208 = st.number_input("006208 持股 (股)", min_value=0, value=ck_int("s1", 10000), step=100, key="s1")
+    shares_00631L = st.number_input("00631L 持股 (股)", min_value=0, value=ck_int("s2", 5000),  step=100, key="s2")
+    shares_2330   = st.number_input("2330 持股 (股)",   min_value=0, value=ck_int("s3", 200),    step=10,  key="s3")
 
     st.markdown("### 🏦 質押條件")
     pledge_loan = st.number_input(
         "質押借款總額 (TWD)", min_value=0,
-        value=qp_int("pl", 1_500_000), step=10_000,
+        value=ck_int("pl", 1_500_000), step=10_000,
         help="目前向券商借出的總金額"
     )
     pledge_rate = st.number_input(
         "質押年利率 (%)", min_value=0.0,
-        value=qp_float("pr", 2.4), step=0.1, format="%.2f"
+        value=ck_float("pr", 2.4), step=0.1, format="%.2f"
     )
     pledge_expiry = st.date_input(
         "借款到期日",
-        value=qp_date("pe", date.today() + timedelta(days=180)),
+        value=ck_date("pe", date.today() + timedelta(days=180)),
         min_value=date.today(),
     )
 
     st.markdown("### 🎯 退休目標")
     target_net = st.number_input(
         "目標淨資產 (TWD)", min_value=1_000_000,
-        value=qp_int("tn", 30_000_000), step=500_000
+        value=ck_int("tn", 30_000_000), step=500_000
     )
     monthly_invest = st.number_input(
         "每月定額投入 (TWD)", min_value=0,
-        value=qp_int("mi", 30_000), step=1_000
+        value=ck_int("mi", 30_000), step=1_000
     )
     withdrawal_rate = st.number_input(
         "安全提領率 (%)", min_value=1.0, max_value=10.0,
-        value=qp_float("wr", 4.0), step=0.1, format="%.1f"
+        value=ck_float("wr", 4.0), step=0.1, format="%.1f"
     )
     dob = st.date_input(
         "出生年月日",
-        value=qp_date("dob", date(1992, 12, 14)),
+        value=ck_date("dob", date(1992, 12, 14)),
         min_value=date(1950, 1, 1),
         max_value=date.today() - timedelta(days=365*18),
     )
@@ -574,23 +547,17 @@ with st.sidebar:
     st.markdown("---")
 
     if st.button("💾  儲存設定", use_container_width=True):
-        params = {
-            "s1":  str(shares_006208),
-            "s2":  str(shares_00631L),
-            "s3":  str(shares_2330),
-            "pl":  str(int(pledge_loan)),
-            "pr":  str(pledge_rate),
-            "pe":  pledge_expiry.isoformat(),
-            "tn":  str(int(target_net)),
-            "mi":  str(int(monthly_invest)),
-            "wr":  str(withdrawal_rate),
-            "dob": dob.isoformat(),
-        }
-        st.query_params.update(params)
-        # Also save to localStorage via JS
-        js_code = "\n".join([f'localStorage.setItem("fire_{k}", "{v}");' for k, v in params.items()])
-        st.components.v1.html(f"<script>{js_code}</script>", height=0)
-        st.success("✅ 設定已永久儲存！下次開啟自動載入")
+        _cookies.set("fire_s1",  str(shares_006208),  max_age=365*24*3600)
+        _cookies.set("fire_s2",  str(shares_00631L),   max_age=365*24*3600)
+        _cookies.set("fire_s3",  str(shares_2330),     max_age=365*24*3600)
+        _cookies.set("fire_pl",  str(int(pledge_loan)), max_age=365*24*3600)
+        _cookies.set("fire_pr",  str(pledge_rate),     max_age=365*24*3600)
+        _cookies.set("fire_pe",  pledge_expiry.isoformat(), max_age=365*24*3600)
+        _cookies.set("fire_tn",  str(int(target_net)), max_age=365*24*3600)
+        _cookies.set("fire_mi",  str(int(monthly_invest)), max_age=365*24*3600)
+        _cookies.set("fire_wr",  str(withdrawal_rate), max_age=365*24*3600)
+        _cookies.set("fire_dob", dob.isoformat(),      max_age=365*24*3600)
+        st.success("✅ 設定已儲存！下次開啟自動載入")
 
     refresh_btn = st.button("⟳  REFRESH PRICES", use_container_width=True)
 
@@ -1008,6 +975,401 @@ with ret_c2:
     </div>
     """, unsafe_allow_html=True)
 
+
+
+
+# ─────────────────────────────────────────────
+# ROW 5 — 季線回測：貸款投資 00631L
+# ─────────────────────────────────────────────
+st.markdown('<br>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">[ 05 ]  季線回測 · 00631L 貸款投資評估</div>', unsafe_allow_html=True)
+
+@st.cache_data(ttl=3600)
+def fetch_backtest_data(period="5y"):
+    try:
+        tkr = yf.Ticker("00631L.TW")
+        df  = tkr.history(period=period)
+        if df.empty:
+            return None
+        df = df[["Close","Volume"]].copy()
+        df.index = pd.to_datetime(df.index).tz_localize(None)
+        return df
+    except:
+        return None
+
+# ── Backtest controls ──
+bt_c1, bt_c2, bt_c3, bt_c4 = st.columns(4)
+with bt_c1:
+    bt_period = st.selectbox("回測期間", ["1y","2y","3y","5y"], index=3, key="bt_period")
+with bt_c2:
+    bt_capital = st.number_input("初始本金 (TWD)", min_value=10000,
+                                  value=ck_int("bt_cap", 300000), step=10000, key="bt_cap_input")
+with bt_c3:
+    bt_loan = st.number_input("貸款金額 (TWD)", min_value=0,
+                               value=ck_int("bt_loan", 700000), step=10000, key="bt_loan_input")
+with bt_c4:
+    bt_rate = st.number_input("貸款年利率 (%)", min_value=0.0,
+                               value=ck_float("bt_rate", float(pledge_rate)),
+                               step=0.1, format="%.2f", key="bt_rate_input")
+
+bt_df = fetch_backtest_data(bt_period)
+
+if bt_df is None or len(bt_df) < 65:
+    st.markdown("""
+    <div class="alert-card-amber">
+        <span style="font-family:'Share Tech Mono',monospace;font-size:0.8rem;color:#ffaa00;">
+            ⚠ 無法取得 00631L 歷史資料，請稍後再試
+        </span>
+    </div>""", unsafe_allow_html=True)
+else:
+    # ── Calculate indicators ──
+    df = bt_df.copy()
+    df["MA60"]  = df["Close"].rolling(60).mean()   # 季線
+    df["MA20"]  = df["Close"].rolling(20).mean()   # 月線
+    df["MA120"] = df["Close"].rolling(120).mean()  # 半年線
+    df = df.dropna()
+
+    total_invest = bt_capital + bt_loan
+    daily_interest_cost = bt_loan * (bt_rate / 100) / 365
+
+    # ── Strategy A: 季線多空策略 with leverage ──
+    # Buy when Close > MA60 (above 季線), sell when Close < MA60
+    cash_lev     = total_invest
+    shares_lev   = 0.0
+    equity_lev   = []
+    in_market_lev = False
+
+    # ── Strategy B: 純持有（buy & hold）with same capital ──
+    shares_hold  = total_invest / df["Close"].iloc[0]
+    loan_days    = 0
+
+    trades       = []
+
+    for i, (idx, row) in enumerate(df.iterrows()):
+        price  = row["Close"]
+        ma60   = row["MA60"]
+
+        above_ma60 = price > ma60
+
+        if above_ma60 and not in_market_lev:
+            # BUY signal
+            shares_lev    = cash_lev / price
+            cash_lev      = 0.0
+            in_market_lev = True
+            trades.append({"date": idx, "action": "BUY", "price": price, "ma60": ma60})
+
+        elif not above_ma60 and in_market_lev:
+            # SELL signal
+            cash_lev      = shares_lev * price
+            shares_lev    = 0.0
+            in_market_lev = False
+            trades.append({"date": idx, "action": "SELL", "price": price, "ma60": ma60})
+
+        # Deduct daily interest when holding (leveraged)
+        if in_market_lev:
+            loan_days += 1
+            cash_lev  -= daily_interest_cost  # deduct from equity
+
+        # Track equity
+        lev_equity  = (shares_lev * price + cash_lev) - bt_loan
+        hold_equity = (shares_hold * price) - bt_loan
+        equity_lev.append({
+            "date":     idx,
+            "price":    price,
+            "ma60":     ma60,
+            "ma20":     row["MA20"],
+            "ma120":    row["MA120"],
+            "lev_eq":   lev_equity,
+            "hold_eq":  hold_equity,
+            "in_mkt":   in_market_lev,
+        })
+
+    result_df = pd.DataFrame(equity_lev).set_index("date")
+
+    # Force-close last position
+    if in_market_lev:
+        final_price    = df["Close"].iloc[-1]
+        final_lev_eq   = shares_lev * final_price + cash_lev - bt_loan
+    else:
+        final_lev_eq   = cash_lev - bt_loan
+
+    # ── Performance metrics ──
+    years = len(df) / 252
+
+    # Leveraged strategy
+    lev_final   = result_df["lev_eq"].iloc[-1]
+    lev_ret     = (lev_final - bt_capital) / bt_capital * 100
+    lev_ann     = ((lev_final / bt_capital) ** (1 / years) - 1) * 100 if bt_capital > 0 and lev_final > 0 else 0
+    lev_dd_ser  = result_df["lev_eq"]
+    lev_peak    = lev_dd_ser.cummax()
+    lev_dd      = ((lev_dd_ser - lev_peak) / lev_peak.abs()).min() * 100
+
+    # Buy & Hold
+    hold_final  = result_df["hold_eq"].iloc[-1]
+    hold_ret    = (hold_final - bt_capital) / bt_capital * 100
+    hold_ann    = ((hold_final / bt_capital) ** (1 / years) - 1) * 100 if bt_capital > 0 and hold_final > 0 else 0
+    hold_dd_ser = result_df["hold_eq"]
+    hold_peak   = hold_dd_ser.cummax()
+    hold_dd     = ((hold_dd_ser - hold_peak) / hold_peak.abs()).min() * 100
+
+    # Trade stats
+    trade_df    = pd.DataFrame(trades)
+    total_interest = loan_days * daily_interest_cost
+    n_trades    = len([t for t in trades if t["action"] == "BUY"])
+
+    # Win rate
+    wins = 0
+    buy_price = None
+    for t in trades:
+        if t["action"] == "BUY":
+            buy_price = t["price"]
+        elif t["action"] == "SELL" and buy_price:
+            if t["price"] > buy_price:
+                wins += 1
+    win_rate = (wins / n_trades * 100) if n_trades > 0 else 0
+
+    # ── KPI Cards ──
+    st.markdown('<br>', unsafe_allow_html=True)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+    def kpi_card(label, value, sub="", color="#00d4ff"):
+        return f"""
+        <div class="alert-card-neutral" style="text-align:center;padding:12px;">
+            <div class="kpi-label">{label}</div>
+            <div style="font-family:'Share Tech Mono',monospace;font-size:1.15rem;
+                        color:{color};font-weight:700;">{value}</div>
+            <div style="font-family:'Share Tech Mono',monospace;font-size:0.62rem;
+                        color:#5a7a8a;margin-top:3px;">{sub}</div>
+        </div>"""
+
+    lev_color  = "#00ff88" if lev_ret >= 0 else "#ff3366"
+    hold_color = "#00ff88" if hold_ret >= 0 else "#ff3366"
+
+    with k1:
+        st.markdown(kpi_card("策略總報酬", f"{lev_ret:+.1f}%",
+                             f"年化 {lev_ann:.1f}%", lev_color), unsafe_allow_html=True)
+    with k2:
+        st.markdown(kpi_card("持有總報酬", f"{hold_ret:+.1f}%",
+                             f"年化 {hold_ann:.1f}%", hold_color), unsafe_allow_html=True)
+    with k3:
+        st.markdown(kpi_card("策略最大回撤", f"{lev_dd:.1f}%",
+                             "季線策略", "#ffaa00"), unsafe_allow_html=True)
+    with k4:
+        st.markdown(kpi_card("持有最大回撤", f"{hold_dd:.1f}%",
+                             "純持有", "#ffaa00"), unsafe_allow_html=True)
+    with k5:
+        st.markdown(kpi_card("交易次數", f"{n_trades} 次",
+                             f"勝率 {win_rate:.0f}%", "#00d4ff"), unsafe_allow_html=True)
+    with k6:
+        st.markdown(kpi_card("利息成本", fmt_twd(total_interest),
+                             f"{loan_days} 天持倉", "#ff3366"), unsafe_allow_html=True)
+
+    # ── Chart ──
+    st.markdown('<br>', unsafe_allow_html=True)
+
+    import json
+
+    dates_str     = [d.strftime("%Y-%m-%d") for d in result_df.index]
+    price_vals    = result_df["price"].tolist()
+    ma60_vals     = result_df["ma60"].tolist()
+    ma20_vals     = result_df["ma20"].tolist()
+    ma120_vals    = result_df["ma120"].tolist()
+    lev_eq_vals   = result_df["lev_eq"].tolist()
+    hold_eq_vals  = result_df["hold_eq"].tolist()
+    in_mkt_vals   = result_df["in_mkt"].tolist()
+
+    # Build buy/sell markers
+    buy_dates  = [t["date"].strftime("%Y-%m-%d") for t in trades if t["action"] == "BUY"]
+    buy_prices = [t["price"] for t in trades if t["action"] == "BUY"]
+    sell_dates  = [t["date"].strftime("%Y-%m-%d") for t in trades if t["action"] == "SELL"]
+    sell_prices = [t["price"] for t in trades if t["action"] == "SELL"]
+
+    chart_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  body {{ background: #080c10; margin: 0; padding: 10px; font-family: 'Share Tech Mono', monospace; }}
+  .tab-bar {{ display:flex; gap:8px; margin-bottom:12px; }}
+  .tab {{ background:#111820; border:1px solid #1e3a4a; color:#5a7a8a;
+          padding:6px 16px; border-radius:4px; cursor:pointer;
+          font-size:0.7rem; letter-spacing:0.1em; }}
+  .tab.active {{ border-color:#00d4ff; color:#00d4ff; background:rgba(0,212,255,0.05); }}
+  .chart-wrap {{ position:relative; height:340px; }}
+  .legend {{ display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; }}
+  .leg-item {{ display:flex; align-items:center; gap:6px;
+               font-size:0.65rem; color:#5a7a8a; letter-spacing:0.05em; }}
+  .leg-dot {{ width:10px; height:10px; border-radius:50%; }}
+</style>
+</head>
+<body>
+<div class="tab-bar">
+  <div class="tab active" onclick="showChart('price')" id="tab-price">價格 & 季線</div>
+  <div class="tab" onclick="showChart('equity')" id="tab-equity">淨值曲線比較</div>
+</div>
+
+<div class="chart-wrap" id="wrap-price"><canvas id="chartPrice"></canvas></div>
+<div class="chart-wrap" id="wrap-equity" style="display:none"><canvas id="chartEquity"></canvas></div>
+
+<div class="legend">
+  <div class="leg-item"><div class="leg-dot" style="background:#00d4ff"></div>收盤價</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#ffaa00"></div>季線(MA60)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#aaaaff"></div>月線(MA20)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#ff8866"></div>半年線(MA120)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#00ff88"></div>▲ 買入訊號</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#ff3366"></div>▼ 賣出訊號</div>
+</div>
+
+<script>
+const dates    = {json.dumps(dates_str)};
+const prices   = {json.dumps([round(x,2) for x in price_vals])};
+const ma60     = {json.dumps([round(x,2) for x in ma60_vals])};
+const ma20     = {json.dumps([round(x,2) for x in ma20_vals])};
+const ma120    = {json.dumps([round(x,2) for x in ma120_vals])};
+const levEq    = {json.dumps([round(x,0) for x in lev_eq_vals])};
+const holdEq   = {json.dumps([round(x,0) for x in hold_eq_vals])};
+const buyDates = {json.dumps(buy_dates)};
+const buyPrices= {json.dumps([round(x,2) for x in buy_prices])};
+const sellDates= {json.dumps(sell_dates)};
+const sellPrices={json.dumps([round(x,2) for x in sell_prices])};
+
+// Buy/Sell scatter data aligned to date index
+const buyScatter  = buyDates.map((d,i)  => ({{x: d, y: buyPrices[i]}}));
+const sellScatter = sellDates.map((d,i) => ({{x: d, y: sellPrices[i]}}));
+
+const gridColor  = 'rgba(30,58,74,0.6)';
+const tickColor  = '#2a4a5a';
+
+const commonScales = {{
+  x: {{
+    type: 'category',
+    ticks: {{ color: tickColor, maxTicksLimit: 8, font:{{size:10}} }},
+    grid: {{ color: gridColor }}
+  }},
+  y: {{
+    ticks: {{ color: tickColor, font:{{size:10}} }},
+    grid: {{ color: gridColor }}
+  }}
+}};
+
+// ── Price Chart ──
+const ctxP = document.getElementById('chartPrice').getContext('2d');
+const priceChart = new Chart(ctxP, {{
+  type: 'line',
+  data: {{
+    labels: dates,
+    datasets: [
+      {{ label:'收盤價', data: prices, borderColor:'#00d4ff', borderWidth:1.5,
+         pointRadius:0, tension:0.1, yAxisID:'yp' }},
+      {{ label:'季線MA60', data: ma60,   borderColor:'#ffaa00', borderWidth:2,
+         pointRadius:0, tension:0.3, borderDash:[4,2], yAxisID:'yp' }},
+      {{ label:'月線MA20', data: ma20,   borderColor:'#aaaaff', borderWidth:1,
+         pointRadius:0, tension:0.3, borderDash:[2,3], yAxisID:'yp' }},
+      {{ label:'半年線MA120', data: ma120, borderColor:'#ff8866', borderWidth:1,
+         pointRadius:0, tension:0.3, borderDash:[6,3], yAxisID:'yp' }},
+      {{ label:'買入', data: buyScatter, type:'scatter',
+         backgroundColor:'#00ff88', pointRadius:7, pointStyle:'triangle',
+         yAxisID:'yp', showLine:false }},
+      {{ label:'賣出', data: sellScatter, type:'scatter',
+         backgroundColor:'#ff3366', pointRadius:7, pointStyle:'triangle',
+         rotation:180, yAxisID:'yp', showLine:false }},
+    ]
+  }},
+  options: {{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{{ legend:{{display:false}}, tooltip:{{
+      mode:'index', intersect:false,
+      backgroundColor:'#111820', borderColor:'#1e3a4a', borderWidth:1,
+      titleColor:'#00d4ff', bodyColor:'#5a7a8a', titleFont:{{size:11}}
+    }}}},
+    scales:{{ ...commonScales, yp:{{ position:'left',
+      ticks:{{color:tickColor, font:{{size:10}}}}, grid:{{color:gridColor}} }} }}
+  }}
+}});
+
+// ── Equity Chart ──
+const ctxE = document.getElementById('chartEquity').getContext('2d');
+const equityChart = new Chart(ctxE, {{
+  type: 'line',
+  data: {{
+    labels: dates,
+    datasets: [
+      {{ label:'季線策略淨值', data: levEq,  borderColor:'#00ff88', borderWidth:2,
+         pointRadius:0, tension:0.1, fill:false }},
+      {{ label:'純持有淨值',   data: holdEq, borderColor:'#00d4ff', borderWidth:1.5,
+         pointRadius:0, tension:0.1, borderDash:[4,2], fill:false }},
+      {{ label:'本金基準線',   data: dates.map(()=>{bt_capital}), borderColor:'#2a4a5a',
+         borderWidth:1, pointRadius:0, borderDash:[2,4], fill:false }},
+    ]
+  }},
+  options: {{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{{ legend:{{ labels:{{ color:'#5a7a8a', font:{{size:10}}, boxWidth:12 }} }},
+      tooltip:{{
+        mode:'index', intersect:false,
+        backgroundColor:'#111820', borderColor:'#1e3a4a', borderWidth:1,
+        titleColor:'#00d4ff', bodyColor:'#5a7a8a',
+        callbacks:{{ label: ctx => ` ${{ctx.dataset.label}}: ${{ctx.raw.toLocaleString()}}` }}
+      }} }},
+    scales: commonScales
+  }}
+}});
+
+function showChart(name) {{
+  document.getElementById('wrap-price').style.display  = name==='price'  ? '' : 'none';
+  document.getElementById('wrap-equity').style.display = name==='equity' ? '' : 'none';
+  document.getElementById('tab-price').classList.toggle('active',  name==='price');
+  document.getElementById('tab-equity').classList.toggle('active', name==='equity');
+}}
+</script>
+</body>
+</html>"""
+
+    st.components.v1.html(chart_html, height=440, scrolling=False)
+
+    # ── Summary Box ──
+    alpha = lev_ret - hold_ret
+    alpha_color = "#00ff88" if alpha >= 0 else "#ff3366"
+    conclusion = "✅ 季線策略優於純持有" if alpha >= 0 else "⚠ 此期間純持有表現較佳"
+
+    st.markdown(f"""
+    <div class="alert-card-neutral" style="margin-top:12px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+            <div>
+                <div class="kpi-label">超額報酬 (Alpha)</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;
+                            color:{alpha_color};">{alpha:+.1f}%</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;
+                            color:#5a7a8a;">策略 vs 純持有</div>
+            </div>
+            <div>
+                <div class="kpi-label">利息成本 / 總報酬</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#ffaa00;">
+                    {(total_interest / max(abs(lev_final - bt_capital), 1) * 100):.1f}%
+                </div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;">
+                    利息侵蝕比例
+                </div>
+            </div>
+            <div>
+                <div class="kpi-label">回測結論</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.85rem;
+                            color:{alpha_color};line-height:1.4;">{conclusion}</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;">
+                    {bt_period} 回測 · 季線進出場
+                </div>
+            </div>
+        </div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#2a4a5a;
+                    margin-top:12px;line-height:1.8;">
+            策略邏輯：收盤價 > 季線(MA60) → 全倉買入 ｜ 收盤價 < 季線 → 全數賣出<br>
+            資金結構：本金 {fmt_twd(bt_capital)} + 貸款 {fmt_twd(bt_loan)} = 總資金 {fmt_twd(total_invest)}<br>
+            利率成本：年利率 {bt_rate:.2f}% · 實際持倉 {loan_days} 天 · 總利息 {fmt_twd(total_interest)}<br>
+            ⚠ 以上為歷史回測，不代表未來績效，貸款投資有強制平倉風險
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # ROW 5 — STRATEGY SOP
