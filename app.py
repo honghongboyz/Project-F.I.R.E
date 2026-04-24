@@ -465,8 +465,44 @@ def months_to_retirement(
 
 
 # ─────────────────────────────────────────────
-# LOAD SAVED SETTINGS FROM URL QUERY PARAMS
+# PERSISTENT SETTINGS VIA LOCALSTORAGE + QUERY PARAMS
+# Priority: query_params > localStorage > hardcoded defaults
 # ─────────────────────────────────────────────
+
+# Inject JS to read localStorage and push values into URL on first load
+st.components.v1.html("""
+<script>
+(function() {
+    // Only run in the top frame
+    if (window.self !== window.top) return;
+
+    const KEYS = ["s1","s2","s3","pl","pr","pe","tn","mi","wr","dob"];
+    const url = new URL(window.location.href);
+    let changed = false;
+
+    // If URL already has our params, save them to localStorage (user just saved)
+    let hasAll = KEYS.every(k => url.searchParams.has(k));
+    if (hasAll) {
+        KEYS.forEach(k => localStorage.setItem("fire_" + k, url.searchParams.get(k)));
+        return;
+    }
+
+    // Otherwise load from localStorage and inject into URL
+    KEYS.forEach(k => {
+        const v = localStorage.getItem("fire_" + k);
+        if (v !== null && !url.searchParams.has(k)) {
+            url.searchParams.set(k, v);
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        window.location.replace(url.toString());
+    }
+})();
+</script>
+""", height=0)
+
 def qp_int(key, default):
     try:    return int(st.query_params[key])
     except: return default
@@ -537,20 +573,24 @@ with st.sidebar:
 
     st.markdown("---")
 
-    if st.button("💾  儲存設定到書籤", use_container_width=True):
-        st.query_params.update({
+    if st.button("💾  儲存設定", use_container_width=True):
+        params = {
             "s1":  str(shares_006208),
             "s2":  str(shares_00631L),
             "s3":  str(shares_2330),
-            "pl":  str(pledge_loan),
+            "pl":  str(int(pledge_loan)),
             "pr":  str(pledge_rate),
             "pe":  pledge_expiry.isoformat(),
-            "tn":  str(target_net),
-            "mi":  str(monthly_invest),
+            "tn":  str(int(target_net)),
+            "mi":  str(int(monthly_invest)),
             "wr":  str(withdrawal_rate),
             "dob": dob.isoformat(),
-        })
-        st.success("✅ 已儲存！請將目前網址加入書籤")
+        }
+        st.query_params.update(params)
+        # Also save to localStorage via JS
+        js_code = "\n".join([f'localStorage.setItem("fire_{k}", "{v}");' for k, v in params.items()])
+        st.components.v1.html(f"<script>{js_code}</script>", height=0)
+        st.success("✅ 設定已永久儲存！下次開啟自動載入")
 
     refresh_btn = st.button("⟳  REFRESH PRICES", use_container_width=True)
 
