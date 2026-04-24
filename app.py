@@ -764,11 +764,12 @@ with mon_c2:
         ratio_msg   = f"維持率充足，策略安全運行中"
         ratio_pct_bar = min(pledge_ratio / 3.5, 100)
 
+    ratio_display = f"{pledge_ratio:.1f}" if pledge_loan > 0 else "∞"
     st.markdown(f"""
     <div class="{ratio_class}">
         <div class="kpi-label">006208 質押維持率</div>
         <div class="kpi-num" style='color:{ratio_color};'>
-            {pledge_ratio:.1f if pledge_loan > 0 else '∞'}<span style='font-size:1rem;'>%</span>
+            {ratio_display}<span style='font-size:1rem;'>%</span>
         </div>
         <div class="progress-wrap">
             <div class="{ratio_bar}" style='width:{ratio_pct_bar:.1f}%;'></div>
