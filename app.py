@@ -465,8 +465,43 @@ def months_to_retirement(
 
 
 # ─────────────────────────────────────────────
-# PERSISTENT SETTINGS VIA QUERY PARAMS
+# PERSISTENT SETTINGS — localStorage via JS bridge
 # ─────────────────────────────────────────────
+
+# JS component: on load, read localStorage and push into query params via redirect
+st.components.v1.html("""
+<script>
+(function(){
+  var KEYS = ["s1","s2","s3","pl","pr","pe","tn","mi","wr","dob"];
+  try {
+    var store = window.parent.localStorage;
+    // Check if current URL already has our params (just saved)
+    var urlParams = new URLSearchParams(window.parent.location.search);
+    var hasParams = KEYS.every(function(k){ return urlParams.has(k); });
+    if (hasParams) {
+      // Save fresh values from URL into localStorage
+      KEYS.forEach(function(k){
+        store.setItem("fire_"+k, urlParams.get(k));
+      });
+      return;
+    }
+    // Otherwise: load from localStorage into URL and redirect
+    var stored = {};
+    var allFound = true;
+    KEYS.forEach(function(k){
+      var v = store.getItem("fire_"+k);
+      if (v !== null) { stored[k] = v; } else { allFound = false; }
+    });
+    if (allFound) {
+      var url = new URL(window.parent.location.href);
+      KEYS.forEach(function(k){ url.searchParams.set(k, stored[k]); });
+      window.parent.location.replace(url.toString());
+    }
+  } catch(e) { console.log("storage error:", e); }
+})();
+</script>
+""", height=0)
+
 def ck_int(key, default):
     try:    return int(st.query_params[key])
     except: return default
@@ -537,8 +572,8 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── Auto-sync all settings into URL on every render ──
-    st.query_params.update({
+    # ── Auto-sync settings to URL query params every render ──
+    _params = {
         "s1":  str(shares_006208),
         "s2":  str(shares_00631L),
         "s3":  str(shares_2330),
@@ -549,34 +584,29 @@ with st.sidebar:
         "mi":  str(int(monthly_invest)),
         "wr":  str(withdrawal_rate),
         "dob": dob.isoformat(),
-    })
+    }
+    st.query_params.update(_params)
 
-    # ── Copy URL button ──
-    st.components.v1.html("""
-    <button onclick="
-        navigator.clipboard.writeText(window.parent.location.href).then(()=>{
-            this.innerText='✅ 已複製！存入書籤即永久記憶';
-            this.style.borderColor='#00ff88';
-            this.style.color='#00ff88';
-            setTimeout(()=>{
-                this.innerText='📋  複製設定網址（存書籤）';
-                this.style.borderColor='#1e3a4a';
-                this.style.color='#5a7a8a';
-            }, 3000);
-        });
-    " style="
-        width:100%; padding:9px 0;
-        background:#0d1117; border:1px solid #1e3a4a;
-        color:#5a7a8a; font-family:'Share Tech Mono',monospace;
-        font-size:0.72rem; letter-spacing:0.08em;
-        border-radius:4px; cursor:pointer;
-        transition: all 0.2s;
-    ">📋  複製設定網址（存書籤）</button>
-    <div style="font-family:'Share Tech Mono',monospace;font-size:0.58rem;
-                color:#2a4a5a;margin-top:5px;text-align:center;letter-spacing:0.05em;">
-        設定已自動寫入網址 · 存書籤後永久記憶
+    # ── JS: auto-write to localStorage on every render ──
+    import json as _json
+    _js_vals = _json.dumps(_params)
+    st.components.v1.html(f"""
+    <script>
+    (function(){{
+      try {{
+        var data = {_js_vals};
+        var store = window.parent.localStorage;
+        Object.keys(data).forEach(function(k){{
+          store.setItem("fire_"+k, data[k]);
+        }});
+      }} catch(e) {{ console.log("save error:", e); }}
+    }})();
+    </script>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;
+                color:#1a3a2a;text-align:center;padding:4px 0;letter-spacing:0.08em;">
+        ✓ 設定自動記憶中
     </div>
-    """, height=58)
+    """, height=22)
 
     refresh_btn = st.button("⟳  REFRESH PRICES", use_container_width=True)
 
