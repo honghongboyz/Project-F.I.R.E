@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_cookies_controller import CookieController
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -466,26 +465,18 @@ def months_to_retirement(
 
 
 # ─────────────────────────────────────────────
-# PERSISTENT SETTINGS VIA COOKIES
+# PERSISTENT SETTINGS VIA QUERY PARAMS
 # ─────────────────────────────────────────────
-_cookies = CookieController()
-
 def ck_int(key, default):
-    try:
-        v = _cookies.get("fire_" + key)
-        return int(v) if v is not None else default
+    try:    return int(st.query_params[key])
     except: return default
 
 def ck_float(key, default):
-    try:
-        v = _cookies.get("fire_" + key)
-        return float(v) if v is not None else default
+    try:    return float(st.query_params[key])
     except: return default
 
 def ck_date(key, default):
-    try:
-        v = _cookies.get("fire_" + key)
-        return date.fromisoformat(v) if v is not None else default
+    try:    return date.fromisoformat(st.query_params[key])
     except: return default
 
 # ─────────────────────────────────────────────
@@ -547,17 +538,19 @@ with st.sidebar:
     st.markdown("---")
 
     if st.button("💾  儲存設定", use_container_width=True):
-        _cookies.set("fire_s1",  str(shares_006208),  max_age=365*24*3600)
-        _cookies.set("fire_s2",  str(shares_00631L),   max_age=365*24*3600)
-        _cookies.set("fire_s3",  str(shares_2330),     max_age=365*24*3600)
-        _cookies.set("fire_pl",  str(int(pledge_loan)), max_age=365*24*3600)
-        _cookies.set("fire_pr",  str(pledge_rate),     max_age=365*24*3600)
-        _cookies.set("fire_pe",  pledge_expiry.isoformat(), max_age=365*24*3600)
-        _cookies.set("fire_tn",  str(int(target_net)), max_age=365*24*3600)
-        _cookies.set("fire_mi",  str(int(monthly_invest)), max_age=365*24*3600)
-        _cookies.set("fire_wr",  str(withdrawal_rate), max_age=365*24*3600)
-        _cookies.set("fire_dob", dob.isoformat(),      max_age=365*24*3600)
-        st.success("✅ 設定已儲存！下次開啟自動載入")
+        st.query_params.update({
+            "s1":  str(shares_006208),
+            "s2":  str(shares_00631L),
+            "s3":  str(shares_2330),
+            "pl":  str(int(pledge_loan)),
+            "pr":  str(pledge_rate),
+            "pe":  pledge_expiry.isoformat(),
+            "tn":  str(int(target_net)),
+            "mi":  str(int(monthly_invest)),
+            "wr":  str(withdrawal_rate),
+            "dob": dob.isoformat(),
+        })
+        st.success("✅ 網址已更新！請長按網址列複製，存入備忘錄或加入書籤")
 
     refresh_btn = st.button("⟳  REFRESH PRICES", use_container_width=True)
 
