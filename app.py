@@ -537,20 +537,46 @@ with st.sidebar:
 
     st.markdown("---")
 
-    if st.button("💾  儲存設定", use_container_width=True):
-        st.query_params.update({
-            "s1":  str(shares_006208),
-            "s2":  str(shares_00631L),
-            "s3":  str(shares_2330),
-            "pl":  str(int(pledge_loan)),
-            "pr":  str(pledge_rate),
-            "pe":  pledge_expiry.isoformat(),
-            "tn":  str(int(target_net)),
-            "mi":  str(int(monthly_invest)),
-            "wr":  str(withdrawal_rate),
-            "dob": dob.isoformat(),
-        })
-        st.success("✅ 網址已更新！請長按網址列複製，存入備忘錄或加入書籤")
+    # ── Auto-sync all settings into URL on every render ──
+    st.query_params.update({
+        "s1":  str(shares_006208),
+        "s2":  str(shares_00631L),
+        "s3":  str(shares_2330),
+        "pl":  str(int(pledge_loan)),
+        "pr":  str(pledge_rate),
+        "pe":  pledge_expiry.isoformat(),
+        "tn":  str(int(target_net)),
+        "mi":  str(int(monthly_invest)),
+        "wr":  str(withdrawal_rate),
+        "dob": dob.isoformat(),
+    })
+
+    # ── Copy URL button ──
+    st.components.v1.html("""
+    <button onclick="
+        navigator.clipboard.writeText(window.parent.location.href).then(()=>{
+            this.innerText='✅ 已複製！存入書籤即永久記憶';
+            this.style.borderColor='#00ff88';
+            this.style.color='#00ff88';
+            setTimeout(()=>{
+                this.innerText='📋  複製設定網址（存書籤）';
+                this.style.borderColor='#1e3a4a';
+                this.style.color='#5a7a8a';
+            }, 3000);
+        });
+    " style="
+        width:100%; padding:9px 0;
+        background:#0d1117; border:1px solid #1e3a4a;
+        color:#5a7a8a; font-family:'Share Tech Mono',monospace;
+        font-size:0.72rem; letter-spacing:0.08em;
+        border-radius:4px; cursor:pointer;
+        transition: all 0.2s;
+    ">📋  複製設定網址（存書籤）</button>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:0.58rem;
+                color:#2a4a5a;margin-top:5px;text-align:center;letter-spacing:0.05em;">
+        設定已自動寫入網址 · 存書籤後永久記憶
+    </div>
+    """, height=58)
 
     refresh_btn = st.button("⟳  REFRESH PRICES", use_container_width=True)
 
