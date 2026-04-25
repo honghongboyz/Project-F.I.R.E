@@ -1420,6 +1420,139 @@ function showChart(name) {{
     </div>
     """, unsafe_allow_html=True)
 
+    # ────────────────────────────────────────
+    # YEAR-BY-YEAR COMPARISON TABLE
+    # ────────────────────────────────────────
+    st.markdown('<br>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">[ 05b ]  逐年比較表 · YEAR-BY-YEAR BREAKDOWN</div>', unsafe_allow_html=True)
+
+    @st.cache_data(ttl=3600)
+    def fetch_yearly_data():
+        try:
+            tkr = yf.Ticker("00631L.TW")
+            df  = tkr.history(period="10y")
+            if df.empty: return None
+            df = df[["Close"]].copy()
+            df.index = pd.to_datetime(df.index).tz_localize(None)
+            return df
+        except: return None
+
+    def run_yearly_backtest(df_year, capital, loan, rate):
+        if len(df_year) < 10: return None
+        df = df_year.copy()
+        df["MA60"] = df["Close"].rolling(min(60, len(df)), min_periods=5).mean()
+        df = df.dropna()
+        if df.empty: return None
+        total = capital + loan
+        daily_int = loan * (rate / 100) / 365
+        cash = total; shares = 0.0; in_mkt = False; int_paid = 0.0
+        for _, row in df.iterrows():
+            p = row["Close"]; m = row["MA60"]
+            if p > m and not in_mkt:
+                shares = cash / p; cash = 0.0; in_mkt = True
+            elif p < m and in_mkt:
+                cash = shares * p; shares = 0.0; in_mkt = False
+            if in_mkt: int_paid += daily_int
+        final_val = shares * df["Close"].iloc[-1] + cash
+        strat_ret = (final_val - total - int_paid) / capital * 100
+        bh_shares = total / df["Close"].iloc[0]
+        bh_final  = bh_shares * df["Close"].iloc[-1]
+        bh_ret    = (bh_final - total) / capital * 100
+        eq_series = []
+        c2 = total; s2 = 0.0; im2 = False
+        for _, row in df.iterrows():
+            p = row["Close"]; m = row["MA60"]
+            if p > m and not im2: s2 = c2/p; c2 = 0.0; im2 = True
+            elif p < m and im2:   c2 = s2*p; s2 = 0.0; im2 = False
+            eq_series.append(s2*p + c2 - loan)
+        eq = pd.Series(eq_series)
+        dd = ((eq - eq.cummax()) / eq.cummax().abs()).min() * 100 if len(eq) > 0 else 0
+        return {"strat_ret": strat_ret, "bh_ret": bh_ret, "alpha": strat_ret - bh_ret,
+                "max_dd": dd, "interest": int_paid}
+
+    yr_df = fetch_yearly_data()
+    if yr_df is not None and len(yr_df) > 60:
+        years_avail = sorted(yr_df.index.year.unique())
+        yearly_results = []
+        for yr in years_avail:
+            sl = yr_df[yr_df.index.year == yr]
+            if len(sl) < 20: continue
+            r = run_yearly_backtest(sl, bt_capital, bt_loan, bt_rate)
+            if r: yearly_results.append({"year": yr, **r})
+
+        if yearly_results:
+            rows_html = ""
+            for r in yearly_results:
+                yr = r["year"]; s_ret = r["strat_ret"]; b_ret = r["bh_ret"]
+                alpha = r["alpha"]; dd = r["max_dd"]; interest = r["interest"]
+                s_col = "#00ff88" if s_ret >= 0 else "#ff3366"
+                b_col = "#00ff88" if b_ret >= 0 else "#ff3366"
+                a_col = "#00ff88" if alpha >= 0 else "#ff3366"
+                winner = "🏆 季線" if alpha >= 0 else "📈 持有"
+                w_col  = "#00ff88" if alpha >= 0 else "#ffaa00"
+                rows_html += f"""
+                <tr style="border-bottom:1px solid #1a2a3a;">
+                  <td style="padding:10px 14px;font-family:'Orbitron',monospace;font-size:0.8rem;color:#00d4ff;">{yr}</td>
+                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{s_col};font-size:0.85rem;">{s_ret:+.1f}%</td>
+                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{b_col};font-size:0.85rem;">{b_ret:+.1f}%</td>
+                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{a_col};font-size:0.9rem;font-weight:bold;">{alpha:+.1f}%</td>
+                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:#ffaa00;font-size:0.8rem;">{dd:.1f}%</td>
+                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:#5a7a8a;font-size:0.75rem;">${interest:,.0f}</td>
+                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{w_col};font-size:0.8rem;">{winner}</td>
+                </tr>"""
+
+            strat_wins = sum(1 for r in yearly_results if r["alpha"] >= 0)
+            hold_wins  = len(yearly_results) - strat_wins
+            best_yr    = max(yearly_results, key=lambda r: r["alpha"])
+            worst_yr   = min(yearly_results, key=lambda r: r["alpha"])
+
+            st.markdown(f"""
+            <div class="alert-card-neutral" style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                  <tr style="border-bottom:2px solid #1e3a4a;">
+                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">年份</th>
+                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">季線策略</th>
+                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">純持有</th>
+                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#00d4ff;text-align:left;letter-spacing:0.1em;">Alpha</th>
+                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">最大回撤</th>
+                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">利息成本</th>
+                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">勝出</th>
+                  </tr>
+                </thead>
+                <tbody>{rows_html}</tbody>
+              </table>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;
+                          margin-top:16px;padding-top:12px;border-top:1px solid #1e3a4a;">
+                <div style="text-align:center;">
+                  <div class="kpi-label">季線策略勝出</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#00ff88;">{strat_wins} 年</div>
+                </div>
+                <div style="text-align:center;">
+                  <div class="kpi-label">純持有勝出</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#ffaa00;">{hold_wins} 年</div>
+                </div>
+                <div style="text-align:center;">
+                  <div class="kpi-label">策略最佳年份</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#00ff88;">
+                    {best_yr['year']} ({best_yr['alpha']:+.1f}%)
+                  </div>
+                </div>
+                <div style="text-align:center;">
+                  <div class="kpi-label">策略最差年份</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#ff3366;">
+                    {worst_yr['year']} ({worst_yr['alpha']:+.1f}%)
+                  </div>
+                </div>
+              </div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#2a4a5a;
+                          margin-top:10px;line-height:1.8;">
+                ⚠ 逐年回測各自獨立計算，不代表複利累積效果 ·
+                本金 {fmt_twd(bt_capital)} + 貸款 {fmt_twd(bt_loan)} · 年利率 {bt_rate:.2f}%
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────
 # ROW 5 — STRATEGY SOP
 # ─────────────────────────────────────────────
