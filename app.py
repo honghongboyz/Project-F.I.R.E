@@ -1028,532 +1028,488 @@ with ret_c2:
 
 
 # ─────────────────────────────────────────────
-# ROW 5 — 季線回測：貸款投資 00631L
+
+# ─────────────────────────────────────────────
+# DATA PERSISTENCE — localStorage JSON bridge
+# ─────────────────────────────────────────────
+import json as _json
+import base64 as _b64
+
+def _encode(obj): return _b64.b64encode(_json.dumps(obj, ensure_ascii=False).encode()).decode()
+def _decode(s, default):
+    try: return _json.loads(_b64.b64decode(s).decode())
+    except: return default
+
+# Load persisted data from query params (written by JS on prev session)
+_raw_snap  = st.query_params.get("snap",  "")
+_raw_dca   = st.query_params.get("dca",   "")
+_raw_fun   = st.query_params.get("fun",   "")
+_raw_big   = st.query_params.get("big",   "")
+_raw_fcfg  = st.query_params.get("fcfg",  "")
+
+if "snapshots"   not in st.session_state: st.session_state.snapshots   = _decode(_raw_snap, [])
+if "dca_records" not in st.session_state: st.session_state.dca_records = _decode(_raw_dca,  [])
+if "fun_exp"     not in st.session_state: st.session_state.fun_exp     = _decode(_raw_fun,  [])
+if "big_plans"   not in st.session_state: st.session_state.big_plans   = _decode(_raw_big,  [])
+if "fun_budget"  not in st.session_state:
+    cfg = _decode(_raw_fcfg, {})
+    st.session_state.fun_budget = cfg.get("budget", 5000)
+
+def _persist():
+    """Write all app data into URL query params (JS will auto-save to localStorage)."""
+    st.query_params.update({
+        "snap": _encode(st.session_state.snapshots),
+        "dca":  _encode(st.session_state.dca_records),
+        "fun":  _encode(st.session_state.fun_exp),
+        "big":  _encode(st.session_state.big_plans),
+        "fcfg": _encode({"budget": st.session_state.fun_budget}),
+    })
+
+# ─────────────────────────────────────────────
+# ROW 5 — 月報快照 MONTHLY SNAPSHOT
 # ─────────────────────────────────────────────
 st.markdown('<br>', unsafe_allow_html=True)
-st.markdown('<div class="section-header">[ 05 ]  季線回測 · 00631L 貸款投資評估</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">[ 05 ]  月報快照 · MONTHLY NET ASSET SNAPSHOT</div>', unsafe_allow_html=True)
 
-@st.cache_data(ttl=3600)
-def fetch_backtest_data(period="5y"):
-    try:
-        tkr = yf.Ticker("00631L.TW")
-        df  = tkr.history(period=period)
-        if df.empty:
-            return None
-        df = df[["Close","Volume"]].copy()
-        df.index = pd.to_datetime(df.index).tz_localize(None)
-        return df
-    except:
-        return None
+snap_c1, snap_c2 = st.columns([2, 3])
 
-# ── Backtest controls ──
-bt_c1, bt_c2, bt_c3, bt_c4 = st.columns(4)
-with bt_c1:
-    bt_period = st.selectbox("回測期間", ["1y","2y","3y","5y"], index=3, key="bt_period")
-with bt_c2:
-    bt_capital = st.number_input("初始本金 (TWD)", min_value=10000,
-                                  value=ck_int("bt_cap", 300000), step=10000, key="bt_cap_input")
-with bt_c3:
-    bt_loan = st.number_input("貸款金額 (TWD)", min_value=0,
-                               value=ck_int("bt_loan", 700000), step=10000, key="bt_loan_input")
-with bt_c4:
-    bt_rate = st.number_input("貸款年利率 (%)", min_value=0.0,
-                               value=ck_float("bt_rate", float(pledge_rate)),
-                               step=0.1, format="%.2f", key="bt_rate_input")
+with snap_c1:
+    st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.7rem;color:#5a7a8a;margin-bottom:8px;letter-spacing:0.08em;">記錄本月淨資產</div>', unsafe_allow_html=True)
+    snap_note = st.text_input("備註 (可留空)", placeholder="e.g. 加薪、買新股", key="snap_note", label_visibility="collapsed")
+    if st.button("📸  記錄本月快照", use_container_width=True):
+        entry = {
+            "date":  datetime.now().strftime("%Y-%m"),
+            "net":   round(net_asset),
+            "total": round(total_mv),
+            "note":  snap_note or "",
+        }
+        # Avoid duplicate same month
+        st.session_state.snapshots = [s for s in st.session_state.snapshots if s["date"] != entry["date"]]
+        st.session_state.snapshots.append(entry)
+        st.session_state.snapshots.sort(key=lambda x: x["date"])
+        _persist()
+        st.success(f"✅ {entry['date']} 快照已儲存")
 
-bt_df = fetch_backtest_data(bt_period)
+    if st.session_state.snapshots:
+        if st.button("🗑  刪除最後一筆", use_container_width=True):
+            st.session_state.snapshots.pop()
+            _persist()
+            st.rerun()
 
-if bt_df is None or len(bt_df) < 65:
-    st.markdown("""
-    <div class="alert-card-amber">
-        <span style="font-family:'Share Tech Mono',monospace;font-size:0.8rem;color:#ffaa00;">
-            ⚠ 無法取得 00631L 歷史資料，請稍後再試
-        </span>
-    </div>""", unsafe_allow_html=True)
-else:
-    # ── Calculate indicators ──
-    df = bt_df.copy()
-    df["MA60"]  = df["Close"].rolling(60).mean()   # 季線
-    df["MA20"]  = df["Close"].rolling(20).mean()   # 月線
-    df["MA120"] = df["Close"].rolling(120).mean()  # 半年線
-    df = df.dropna()
+with snap_c2:
+    if len(st.session_state.snapshots) >= 2:
+        snaps = st.session_state.snapshots
+        labels_js = _json.dumps([s["date"] for s in snaps])
+        net_js    = _json.dumps([s["net"]   for s in snaps])
+        total_js  = _json.dumps([s["total"] for s in snaps])
 
-    total_invest = bt_capital + bt_loan
-    daily_interest_cost = bt_loan * (bt_rate / 100) / 365
+        # Growth stats
+        first_net = snaps[0]["net"]; last_net = snaps[-1]["net"]
+        growth    = last_net - first_net
+        growth_pct = (growth / abs(first_net) * 100) if first_net != 0 else 0
+        months_cnt = len(snaps)
+        monthly_avg = growth / max(months_cnt - 1, 1)
 
-    # ── Strategy A: 季線多空策略 with leverage ──
-    # Buy when Close > MA60 (above 季線), sell when Close < MA60
-    cash_lev     = total_invest
-    shares_lev   = 0.0
-    equity_lev   = []
-    in_market_lev = False
+        g_col = "#00ff88" if growth >= 0 else "#ff3366"
 
-    # ── Strategy B: 純持有（buy & hold）with same capital ──
-    shares_hold  = total_invest / df["Close"].iloc[0]
-    loan_days    = 0
-
-    trades       = []
-
-    for i, (idx, row) in enumerate(df.iterrows()):
-        price  = row["Close"]
-        ma60   = row["MA60"]
-
-        above_ma60 = price > ma60
-
-        if above_ma60 and not in_market_lev:
-            # BUY signal
-            shares_lev    = cash_lev / price
-            cash_lev      = 0.0
-            in_market_lev = True
-            trades.append({"date": idx, "action": "BUY", "price": price, "ma60": ma60})
-
-        elif not above_ma60 and in_market_lev:
-            # SELL signal
-            cash_lev      = shares_lev * price
-            shares_lev    = 0.0
-            in_market_lev = False
-            trades.append({"date": idx, "action": "SELL", "price": price, "ma60": ma60})
-
-        # Deduct daily interest when holding (leveraged)
-        if in_market_lev:
-            loan_days += 1
-            cash_lev  -= daily_interest_cost  # deduct from equity
-
-        # Track equity
-        lev_equity  = (shares_lev * price + cash_lev) - bt_loan
-        hold_equity = (shares_hold * price) - bt_loan
-        equity_lev.append({
-            "date":     idx,
-            "price":    price,
-            "ma60":     ma60,
-            "ma20":     row["MA20"],
-            "ma120":    row["MA120"],
-            "lev_eq":   lev_equity,
-            "hold_eq":  hold_equity,
-            "in_mkt":   in_market_lev,
-        })
-
-    result_df = pd.DataFrame(equity_lev).set_index("date")
-
-    # Force-close last position
-    if in_market_lev:
-        final_price    = df["Close"].iloc[-1]
-        final_lev_eq   = shares_lev * final_price + cash_lev - bt_loan
-    else:
-        final_lev_eq   = cash_lev - bt_loan
-
-    # ── Performance metrics ──
-    years = len(df) / 252
-
-    # Leveraged strategy
-    lev_final   = result_df["lev_eq"].iloc[-1]
-    lev_ret     = (lev_final - bt_capital) / bt_capital * 100
-    lev_ann     = ((lev_final / bt_capital) ** (1 / years) - 1) * 100 if bt_capital > 0 and lev_final > 0 else 0
-    lev_dd_ser  = result_df["lev_eq"]
-    lev_peak    = lev_dd_ser.cummax()
-    lev_dd      = ((lev_dd_ser - lev_peak) / lev_peak.abs()).min() * 100
-
-    # Buy & Hold
-    hold_final  = result_df["hold_eq"].iloc[-1]
-    hold_ret    = (hold_final - bt_capital) / bt_capital * 100
-    hold_ann    = ((hold_final / bt_capital) ** (1 / years) - 1) * 100 if bt_capital > 0 and hold_final > 0 else 0
-    hold_dd_ser = result_df["hold_eq"]
-    hold_peak   = hold_dd_ser.cummax()
-    hold_dd     = ((hold_dd_ser - hold_peak) / hold_peak.abs()).min() * 100
-
-    # Trade stats
-    trade_df    = pd.DataFrame(trades)
-    total_interest = loan_days * daily_interest_cost
-    n_trades    = len([t for t in trades if t["action"] == "BUY"])
-
-    # Win rate
-    wins = 0
-    buy_price = None
-    for t in trades:
-        if t["action"] == "BUY":
-            buy_price = t["price"]
-        elif t["action"] == "SELL" and buy_price:
-            if t["price"] > buy_price:
-                wins += 1
-    win_rate = (wins / n_trades * 100) if n_trades > 0 else 0
-
-    # ── KPI Cards ──
-    st.markdown('<br>', unsafe_allow_html=True)
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-
-    def kpi_card(label, value, sub="", color="#00d4ff"):
-        return f"""
-        <div class="alert-card-neutral" style="text-align:center;padding:12px;">
-            <div class="kpi-label">{label}</div>
-            <div style="font-family:'Share Tech Mono',monospace;font-size:1.15rem;
-                        color:{color};font-weight:700;">{value}</div>
-            <div style="font-family:'Share Tech Mono',monospace;font-size:0.62rem;
-                        color:#5a7a8a;margin-top:3px;">{sub}</div>
-        </div>"""
-
-    lev_color  = "#00ff88" if lev_ret >= 0 else "#ff3366"
-    hold_color = "#00ff88" if hold_ret >= 0 else "#ff3366"
-
-    with k1:
-        st.markdown(kpi_card("策略總報酬", f"{lev_ret:+.1f}%",
-                             f"年化 {lev_ann:.1f}%", lev_color), unsafe_allow_html=True)
-    with k2:
-        st.markdown(kpi_card("持有總報酬", f"{hold_ret:+.1f}%",
-                             f"年化 {hold_ann:.1f}%", hold_color), unsafe_allow_html=True)
-    with k3:
-        st.markdown(kpi_card("策略最大回撤", f"{lev_dd:.1f}%",
-                             "季線策略", "#ffaa00"), unsafe_allow_html=True)
-    with k4:
-        st.markdown(kpi_card("持有最大回撤", f"{hold_dd:.1f}%",
-                             "純持有", "#ffaa00"), unsafe_allow_html=True)
-    with k5:
-        st.markdown(kpi_card("交易次數", f"{n_trades} 次",
-                             f"勝率 {win_rate:.0f}%", "#00d4ff"), unsafe_allow_html=True)
-    with k6:
-        st.markdown(kpi_card("利息成本", fmt_twd(total_interest),
-                             f"{loan_days} 天持倉", "#ff3366"), unsafe_allow_html=True)
-
-    # ── Chart ──
-    st.markdown('<br>', unsafe_allow_html=True)
-
-    import json
-
-    dates_str     = [d.strftime("%Y-%m-%d") for d in result_df.index]
-    price_vals    = result_df["price"].tolist()
-    ma60_vals     = result_df["ma60"].tolist()
-    ma20_vals     = result_df["ma20"].tolist()
-    ma120_vals    = result_df["ma120"].tolist()
-    lev_eq_vals   = result_df["lev_eq"].tolist()
-    hold_eq_vals  = result_df["hold_eq"].tolist()
-    in_mkt_vals   = result_df["in_mkt"].tolist()
-
-    # Build buy/sell markers
-    buy_dates  = [t["date"].strftime("%Y-%m-%d") for t in trades if t["action"] == "BUY"]
-    buy_prices = [t["price"] for t in trades if t["action"] == "BUY"]
-    sell_dates  = [t["date"].strftime("%Y-%m-%d") for t in trades if t["action"] == "SELL"]
-    sell_prices = [t["price"] for t in trades if t["action"] == "SELL"]
-
-    chart_html = f"""
-<!DOCTYPE html>
-<html>
-<head>
+        snap_html = f"""<!DOCTYPE html><html><body style="margin:0;background:transparent;">
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
+  <div style="background:#0d1117;border:1px solid #1e3a4a;border-radius:6px;padding:10px;">
+    <div style="font-family:'Share Tech Mono',monospace;font-size:0.58rem;color:#5a7a8a;letter-spacing:0.1em;">累計成長</div>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:1rem;color:{g_col};">{'+ ' if growth>=0 else ''}{growth/10000:.1f}萬</div>
+  </div>
+  <div style="background:#0d1117;border:1px solid #1e3a4a;border-radius:6px;padding:10px;">
+    <div style="font-family:'Share Tech Mono',monospace;font-size:0.58rem;color:#5a7a8a;letter-spacing:0.1em;">成長率</div>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:1rem;color:{g_col};">{growth_pct:+.1f}%</div>
+  </div>
+  <div style="background:#0d1117;border:1px solid #1e3a4a;border-radius:6px;padding:10px;">
+    <div style="font-family:'Share Tech Mono',monospace;font-size:0.58rem;color:#5a7a8a;letter-spacing:0.1em;">月均增加</div>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:1rem;color:#00d4ff;">{monthly_avg/10000:+.1f}萬</div>
+  </div>
+</div>
+<canvas id="snapChart" height="130"></canvas>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-<style>
-  body {{ background: #080c10; margin: 0; padding: 10px; font-family: 'Share Tech Mono', monospace; }}
-  .tab-bar {{ display:flex; gap:8px; margin-bottom:12px; }}
-  .tab {{ background:#111820; border:1px solid #1e3a4a; color:#5a7a8a;
-          padding:6px 16px; border-radius:4px; cursor:pointer;
-          font-size:0.7rem; letter-spacing:0.1em; }}
-  .tab.active {{ border-color:#00d4ff; color:#00d4ff; background:rgba(0,212,255,0.05); }}
-  .chart-wrap {{ position:relative; height:340px; }}
-  .legend {{ display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; }}
-  .leg-item {{ display:flex; align-items:center; gap:6px;
-               font-size:0.65rem; color:#5a7a8a; letter-spacing:0.05em; }}
-  .leg-dot {{ width:10px; height:10px; border-radius:50%; }}
-</style>
-</head>
-<body>
-<div class="tab-bar">
-  <div class="tab active" onclick="showChart('price')" id="tab-price">價格 & 季線</div>
-  <div class="tab" onclick="showChart('equity')" id="tab-equity">淨值曲線比較</div>
-</div>
-
-<div class="chart-wrap" id="wrap-price"><canvas id="chartPrice"></canvas></div>
-<div class="chart-wrap" id="wrap-equity" style="display:none"><canvas id="chartEquity"></canvas></div>
-
-<div class="legend">
-  <div class="leg-item"><div class="leg-dot" style="background:#00d4ff"></div>收盤價</div>
-  <div class="leg-item"><div class="leg-dot" style="background:#ffaa00"></div>季線(MA60)</div>
-  <div class="leg-item"><div class="leg-dot" style="background:#aaaaff"></div>月線(MA20)</div>
-  <div class="leg-item"><div class="leg-dot" style="background:#ff8866"></div>半年線(MA120)</div>
-  <div class="leg-item"><div class="leg-dot" style="background:#00ff88"></div>▲ 買入訊號</div>
-  <div class="leg-item"><div class="leg-dot" style="background:#ff3366"></div>▼ 賣出訊號</div>
-</div>
-
 <script>
-const dates    = {json.dumps(dates_str)};
-const prices   = {json.dumps([round(x,2) for x in price_vals])};
-const ma60     = {json.dumps([round(x,2) for x in ma60_vals])};
-const ma20     = {json.dumps([round(x,2) for x in ma20_vals])};
-const ma120    = {json.dumps([round(x,2) for x in ma120_vals])};
-const levEq    = {json.dumps([round(x,0) for x in lev_eq_vals])};
-const holdEq   = {json.dumps([round(x,0) for x in hold_eq_vals])};
-const buyDates = {json.dumps(buy_dates)};
-const buyPrices= {json.dumps([round(x,2) for x in buy_prices])};
-const sellDates= {json.dumps(sell_dates)};
-const sellPrices={json.dumps([round(x,2) for x in sell_prices])};
-
-// Buy/Sell scatter data aligned to date index
-const buyScatter  = buyDates.map((d,i)  => ({{x: d, y: buyPrices[i]}}));
-const sellScatter = sellDates.map((d,i) => ({{x: d, y: sellPrices[i]}}));
-
-const gridColor  = 'rgba(30,58,74,0.6)';
-const tickColor  = '#2a4a5a';
-
-const commonScales = {{
-  x: {{
-    type: 'category',
-    ticks: {{ color: tickColor, maxTicksLimit: 8, font:{{size:10}} }},
-    grid: {{ color: gridColor }}
-  }},
-  y: {{
-    ticks: {{ color: tickColor, font:{{size:10}} }},
-    grid: {{ color: gridColor }}
-  }}
-}};
-
-// ── Price Chart ──
-const ctxP = document.getElementById('chartPrice').getContext('2d');
-const priceChart = new Chart(ctxP, {{
+var ctx = document.getElementById('snapChart').getContext('2d');
+new Chart(ctx, {{
   type: 'line',
   data: {{
-    labels: dates,
+    labels: {labels_js},
     datasets: [
-      {{ label:'收盤價', data: prices, borderColor:'#00d4ff', borderWidth:1.5,
-         pointRadius:0, tension:0.1, yAxisID:'yp' }},
-      {{ label:'季線MA60', data: ma60,   borderColor:'#ffaa00', borderWidth:2,
-         pointRadius:0, tension:0.3, borderDash:[4,2], yAxisID:'yp' }},
-      {{ label:'月線MA20', data: ma20,   borderColor:'#aaaaff', borderWidth:1,
-         pointRadius:0, tension:0.3, borderDash:[2,3], yAxisID:'yp' }},
-      {{ label:'半年線MA120', data: ma120, borderColor:'#ff8866', borderWidth:1,
-         pointRadius:0, tension:0.3, borderDash:[6,3], yAxisID:'yp' }},
-      {{ label:'買入', data: buyScatter, type:'scatter',
-         backgroundColor:'#00ff88', pointRadius:7, pointStyle:'triangle',
-         yAxisID:'yp', showLine:false }},
-      {{ label:'賣出', data: sellScatter, type:'scatter',
-         backgroundColor:'#ff3366', pointRadius:7, pointStyle:'triangle',
-         rotation:180, yAxisID:'yp', showLine:false }},
+      {{label:'淨資產', data:{net_js}, borderColor:'#00ff88', backgroundColor:'rgba(0,255,136,0.08)',
+       borderWidth:2, pointBackgroundColor:'#00ff88', pointRadius:4, fill:true, tension:0.3}},
+      {{label:'總市值', data:{total_js}, borderColor:'#00d4ff', borderWidth:1.5,
+       borderDash:[4,4], pointRadius:2, fill:false, tension:0.3}}
     ]
   }},
   options: {{
-    responsive:true, maintainAspectRatio:false,
-    plugins:{{ legend:{{display:false}}, tooltip:{{
-      mode:'index', intersect:false,
-      backgroundColor:'#111820', borderColor:'#1e3a4a', borderWidth:1,
-      titleColor:'#00d4ff', bodyColor:'#5a7a8a', titleFont:{{size:11}}
-    }}}},
-    scales:{{ ...commonScales, yp:{{ position:'left',
-      ticks:{{color:tickColor, font:{{size:10}}}}, grid:{{color:gridColor}} }} }}
+    responsive:true, animation:false,
+    plugins:{{legend:{{labels:{{color:'#5a7a8a',font:{{size:10,family:'Share Tech Mono'}}}}}} }},
+    scales:{{
+      x:{{ticks:{{color:'#5a7a8a',font:{{size:9}}}}, grid:{{color:'#1e3a4a'}}}},
+      y:{{ticks:{{color:'#5a7a8a',font:{{size:9}},
+           callback:function(v){{return (v/10000).toFixed(0)+'萬';}}}},
+         grid:{{color:'#1e3a4a'}}}}
+    }}
   }}
 }});
+</script></body></html>"""
+        st.components.v1.html(snap_html, height=220)
+    elif len(st.session_state.snapshots) == 1:
+        s = st.session_state.snapshots[0]
+        st.markdown(f"""<div class="alert-card-neutral" style="text-align:center;padding:20px;">
+        <div style="font-family:'Share Tech Mono',monospace;color:#5a7a8a;font-size:0.75rem;">
+            已記錄 {s['date']} 淨資產 {s['net']/10000:.1f}萬<br>再記錄一個月即可看到成長曲線 📈
+        </div></div>""", unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="alert-card-neutral" style="text-align:center;padding:24px;"><div style="font-family:Share Tech Mono,monospace;color:#5a7a8a;font-size:0.75rem;">尚無快照資料<br>按左側按鈕記錄本月淨資產</div></div>', unsafe_allow_html=True)
 
-// ── Equity Chart ──
-const ctxE = document.getElementById('chartEquity').getContext('2d');
-const equityChart = new Chart(ctxE, {{
-  type: 'line',
-  data: {{
-    labels: dates,
-    datasets: [
-      {{ label:'季線策略淨值', data: levEq,  borderColor:'#00ff88', borderWidth:2,
-         pointRadius:0, tension:0.1, fill:false }},
-      {{ label:'純持有淨值',   data: holdEq, borderColor:'#00d4ff', borderWidth:1.5,
-         pointRadius:0, tension:0.1, borderDash:[4,2], fill:false }},
-      {{ label:'本金基準線',   data: dates.map(()=>{bt_capital}), borderColor:'#2a4a5a',
-         borderWidth:1, pointRadius:0, borderDash:[2,4], fill:false }},
-    ]
-  }},
-  options: {{
-    responsive:true, maintainAspectRatio:false,
-    plugins:{{ legend:{{ labels:{{ color:'#5a7a8a', font:{{size:10}}, boxWidth:12 }} }},
-      tooltip:{{
-        mode:'index', intersect:false,
-        backgroundColor:'#111820', borderColor:'#1e3a4a', borderWidth:1,
-        titleColor:'#00d4ff', bodyColor:'#5a7a8a',
-        callbacks:{{ label: ctx => ` ${{ctx.dataset.label}}: ${{ctx.raw.toLocaleString()}}` }}
-      }} }},
-    scales: commonScales
-  }}
-}});
-
-function showChart(name) {{
-  document.getElementById('wrap-price').style.display  = name==='price'  ? '' : 'none';
-  document.getElementById('wrap-equity').style.display = name==='equity' ? '' : 'none';
-  document.getElementById('tab-price').classList.toggle('active',  name==='price');
-  document.getElementById('tab-equity').classList.toggle('active', name==='equity');
-}}
-</script>
-</body>
-</html>"""
-
-    st.components.v1.html(chart_html, height=440, scrolling=False)
-
-    # ── Summary Box ──
-    alpha = lev_ret - hold_ret
-    alpha_color = "#00ff88" if alpha >= 0 else "#ff3366"
-    conclusion = "✅ 季線策略優於純持有" if alpha >= 0 else "⚠ 此期間純持有表現較佳"
-
-    st.markdown(f"""
-    <div class="alert-card-neutral" style="margin-top:12px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
-            <div>
-                <div class="kpi-label">超額報酬 (Alpha)</div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;
-                            color:{alpha_color};">{alpha:+.1f}%</div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;
-                            color:#5a7a8a;">策略 vs 純持有</div>
-            </div>
-            <div>
-                <div class="kpi-label">利息成本 / 總報酬</div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#ffaa00;">
-                    {(total_interest / max(abs(lev_final - bt_capital), 1) * 100):.1f}%
-                </div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;">
-                    利息侵蝕比例
-                </div>
-            </div>
-            <div>
-                <div class="kpi-label">回測結論</div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:0.85rem;
-                            color:{alpha_color};line-height:1.4;">{conclusion}</div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;">
-                    {bt_period} 回測 · 季線進出場
-                </div>
-            </div>
-        </div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#2a4a5a;
-                    margin-top:12px;line-height:1.8;">
-            策略邏輯：收盤價 > 季線(MA60) → 全倉買入 ｜ 收盤價 < 季線 → 全數賣出<br>
-            資金結構：本金 {fmt_twd(bt_capital)} + 貸款 {fmt_twd(bt_loan)} = 總資金 {fmt_twd(total_invest)}<br>
-            利率成本：年利率 {bt_rate:.2f}% · 實際持倉 {loan_days} 天 · 總利息 {fmt_twd(total_interest)}<br>
-            ⚠ 以上為歷史回測，不代表未來績效，貸款投資有強制平倉風險
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ────────────────────────────────────────
-    # YEAR-BY-YEAR COMPARISON TABLE
-    # ────────────────────────────────────────
-    st.markdown('<br>', unsafe_allow_html=True)
-    st.markdown('<div class="section-header">[ 05b ]  逐年比較表 · YEAR-BY-YEAR BREAKDOWN</div>', unsafe_allow_html=True)
-
-    @st.cache_data(ttl=3600)
-    def fetch_yearly_data():
-        try:
-            tkr = yf.Ticker("00631L.TW")
-            df  = tkr.history(period="10y")
-            if df.empty: return None
-            df = df[["Close"]].copy()
-            df.index = pd.to_datetime(df.index).tz_localize(None)
-            return df
-        except: return None
-
-    def run_yearly_backtest(df_year, capital, loan, rate):
-        if len(df_year) < 10: return None
-        df = df_year.copy()
-        df["MA60"] = df["Close"].rolling(min(60, len(df)), min_periods=5).mean()
-        df = df.dropna()
-        if df.empty: return None
-        total = capital + loan
-        daily_int = loan * (rate / 100) / 365
-        cash = total; shares = 0.0; in_mkt = False; int_paid = 0.0
-        for _, row in df.iterrows():
-            p = row["Close"]; m = row["MA60"]
-            if p > m and not in_mkt:
-                shares = cash / p; cash = 0.0; in_mkt = True
-            elif p < m and in_mkt:
-                cash = shares * p; shares = 0.0; in_mkt = False
-            if in_mkt: int_paid += daily_int
-        final_val = shares * df["Close"].iloc[-1] + cash
-        strat_ret = (final_val - total - int_paid) / capital * 100
-        bh_shares = total / df["Close"].iloc[0]
-        bh_final  = bh_shares * df["Close"].iloc[-1]
-        bh_ret    = (bh_final - total) / capital * 100
-        eq_series = []
-        c2 = total; s2 = 0.0; im2 = False
-        for _, row in df.iterrows():
-            p = row["Close"]; m = row["MA60"]
-            if p > m and not im2: s2 = c2/p; c2 = 0.0; im2 = True
-            elif p < m and im2:   c2 = s2*p; s2 = 0.0; im2 = False
-            eq_series.append(s2*p + c2 - loan)
-        eq = pd.Series(eq_series)
-        dd = ((eq - eq.cummax()) / eq.cummax().abs()).min() * 100 if len(eq) > 0 else 0
-        return {"strat_ret": strat_ret, "bh_ret": bh_ret, "alpha": strat_ret - bh_ret,
-                "max_dd": dd, "interest": int_paid}
-
-    yr_df = fetch_yearly_data()
-    if yr_df is not None and len(yr_df) > 60:
-        years_avail = sorted(yr_df.index.year.unique())
-        yearly_results = []
-        for yr in years_avail:
-            sl = yr_df[yr_df.index.year == yr]
-            if len(sl) < 20: continue
-            r = run_yearly_backtest(sl, bt_capital, bt_loan, bt_rate)
-            if r: yearly_results.append({"year": yr, **r})
-
-        if yearly_results:
-            rows_html = ""
-            for r in yearly_results:
-                yr = r["year"]; s_ret = r["strat_ret"]; b_ret = r["bh_ret"]
-                alpha = r["alpha"]; dd = r["max_dd"]; interest = r["interest"]
-                s_col = "#00ff88" if s_ret >= 0 else "#ff3366"
-                b_col = "#00ff88" if b_ret >= 0 else "#ff3366"
-                a_col = "#00ff88" if alpha >= 0 else "#ff3366"
-                winner = "🏆 季線" if alpha >= 0 else "📈 持有"
-                w_col  = "#00ff88" if alpha >= 0 else "#ffaa00"
-                rows_html += f"""
-                <tr style="border-bottom:1px solid #1a2a3a;">
-                  <td style="padding:10px 14px;font-family:'Orbitron',monospace;font-size:0.8rem;color:#00d4ff;">{yr}</td>
-                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{s_col};font-size:0.85rem;">{s_ret:+.1f}%</td>
-                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{b_col};font-size:0.85rem;">{b_ret:+.1f}%</td>
-                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{a_col};font-size:0.9rem;font-weight:bold;">{alpha:+.1f}%</td>
-                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:#ffaa00;font-size:0.8rem;">{dd:.1f}%</td>
-                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:#5a7a8a;font-size:0.75rem;">${interest:,.0f}</td>
-                  <td style="padding:10px 14px;font-family:'Share Tech Mono',monospace;color:{w_col};font-size:0.8rem;">{winner}</td>
-                </tr>"""
-
-            strat_wins = sum(1 for r in yearly_results if r["alpha"] >= 0)
-            hold_wins  = len(yearly_results) - strat_wins
-            best_yr    = max(yearly_results, key=lambda r: r["alpha"])
-            worst_yr   = min(yearly_results, key=lambda r: r["alpha"])
-
-            st.markdown(f"""
-            <div class="alert-card-neutral" style="overflow-x:auto;">
-              <table style="width:100%;border-collapse:collapse;">
-                <thead>
-                  <tr style="border-bottom:2px solid #1e3a4a;">
-                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">年份</th>
-                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">季線策略</th>
-                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">純持有</th>
-                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#00d4ff;text-align:left;letter-spacing:0.1em;">Alpha</th>
-                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">最大回撤</th>
-                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">利息成本</th>
-                    <th style="padding:10px 14px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;text-align:left;letter-spacing:0.1em;">勝出</th>
-                  </tr>
-                </thead>
-                <tbody>{rows_html}</tbody>
-              </table>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;
-                          margin-top:16px;padding-top:12px;border-top:1px solid #1e3a4a;">
-                <div style="text-align:center;">
-                  <div class="kpi-label">季線策略勝出</div>
-                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#00ff88;">{strat_wins} 年</div>
-                </div>
-                <div style="text-align:center;">
-                  <div class="kpi-label">純持有勝出</div>
-                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#ffaa00;">{hold_wins} 年</div>
-                </div>
-                <div style="text-align:center;">
-                  <div class="kpi-label">策略最佳年份</div>
-                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#00ff88;">
-                    {best_yr['year']} ({best_yr['alpha']:+.1f}%)
-                  </div>
-                </div>
-                <div style="text-align:center;">
-                  <div class="kpi-label">策略最差年份</div>
-                  <div style="font-family:'Share Tech Mono',monospace;font-size:1.2rem;color:#ff3366;">
-                    {worst_yr['year']} ({worst_yr['alpha']:+.1f}%)
-                  </div>
-                </div>
-              </div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#2a4a5a;
-                          margin-top:10px;line-height:1.8;">
-                ⚠ 逐年回測各自獨立計算，不代表複利累積效果 ·
-                本金 {fmt_twd(bt_capital)} + 貸款 {fmt_twd(bt_loan)} · 年利率 {bt_rate:.2f}%
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+# Show snapshot table
+if st.session_state.snapshots:
+    with st.expander(f"📋  查看所有快照記錄（共 {len(st.session_state.snapshots)} 筆）"):
+        rows = ""
+        for i, s in enumerate(reversed(st.session_state.snapshots)):
+            rows += f"""<tr style="border-bottom:1px solid #1a2a3a;">
+              <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#00d4ff;font-size:0.8rem;">{s['date']}</td>
+              <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#00ff88;font-size:0.8rem;">{s['net']/10000:.2f} 萬</td>
+              <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#5a7a8a;font-size:0.75rem;">{s['total']/10000:.2f} 萬</td>
+              <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#5a7a8a;font-size:0.75rem;">{s.get('note','')}</td>
+            </tr>"""
+        st.markdown(f"""<div class="alert-card-neutral" style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead><tr style="border-bottom:2px solid #1e3a4a;">
+              <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.62rem;color:#5a7a8a;text-align:left;">月份</th>
+              <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.62rem;color:#5a7a8a;text-align:left;">淨資產</th>
+              <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.62rem;color:#5a7a8a;text-align:left;">總市值</th>
+              <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.62rem;color:#5a7a8a;text-align:left;">備註</th>
+            </tr></thead>
+            <tbody>{rows}</tbody>
+          </table></div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
+# ROW 6 — 00631L 定期定額追蹤器
+# ─────────────────────────────────────────────
+st.markdown('<br>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">[ 06 ]  定期定額追蹤器 · 00631L DCA TRACKER</div>', unsafe_allow_html=True)
+
+dca_c1, dca_c2 = st.columns([2, 3])
+
+with dca_c1:
+    st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.7rem;color:#5a7a8a;margin-bottom:8px;letter-spacing:0.08em;">新增買入記錄</div>', unsafe_allow_html=True)
+    dca_date   = st.date_input("買入日期", value=date.today(), key="dca_date")
+    dca_shares = st.number_input("買入股數", min_value=1, value=1000, step=100, key="dca_shares")
+    dca_price  = st.number_input("買入價格 (TWD)", min_value=0.1, value=float(p_00631L) if p_00631L else 27.0, step=0.1, format="%.2f", key="dca_price")
+
+    if st.button("➕  新增買入記錄", use_container_width=True):
+        st.session_state.dca_records.append({
+            "date":   str(dca_date),
+            "shares": dca_shares,
+            "price":  round(dca_price, 2),
+            "cost":   round(dca_shares * dca_price),
+        })
+        st.session_state.dca_records.sort(key=lambda x: x["date"])
+        _persist()
+        st.success("✅ 已新增")
+
+    if st.session_state.dca_records:
+        if st.button("🗑  刪除最後一筆", use_container_width=True, key="dca_del"):
+            st.session_state.dca_records.pop()
+            _persist()
+            st.rerun()
+
+with dca_c2:
+    if st.session_state.dca_records:
+        records = st.session_state.dca_records
+        total_shares = sum(r["shares"] for r in records)
+        total_cost   = sum(r["cost"]   for r in records)
+        avg_price    = total_cost / total_shares if total_shares > 0 else 0
+        current_val  = total_shares * p_00631L if p_00631L else 0
+        pnl          = current_val - total_cost
+        pnl_pct      = pnl / total_cost * 100 if total_cost > 0 else 0
+        pnl_col      = "#00ff88" if pnl >= 0 else "#ff3366"
+        target_gap   = 1_000_000 - current_val
+        target_pct   = min(current_val / 1_000_000 * 100, 100)
+
+        st.markdown(f"""
+        <div class="alert-card-neutral">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
+            <div>
+              <div class="kpi-label">平均成本</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:1.1rem;color:#00d4ff;">${avg_price:.2f}</div>
+              <div class="kpi-sub">現價 ${p_00631L:.2f if p_00631L else '--'}</div>
+            </div>
+            <div>
+              <div class="kpi-label">未實現損益</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:1.1rem;color:{pnl_col};">{pnl:+,.0f}</div>
+              <div class="kpi-sub" style="color:{pnl_col};">{pnl_pct:+.2f}%</div>
+            </div>
+            <div>
+              <div class="kpi-label">總持股</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:1.1rem;color:#e8f4f8;">{total_shares:,} 股</div>
+              <div class="kpi-sub">市值 ${current_val:,.0f}</div>
+            </div>
+          </div>
+          <div class="kpi-label" style="margin-bottom:4px;">100萬目標進度</div>
+          <div class="progress-wrap">
+            <div class="progress-fill-{'green' if target_pct >= 100 else 'amber'}" style="width:{target_pct:.1f}%;"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:0.68rem;color:#5a7a8a;">{target_pct:.1f}% 達成</span>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:0.68rem;color:#ffaa00;">
+              {'🎯 達標！可執行轉換' if target_gap <= 0 else f'尚差 ${max(target_gap,0):,.0f}'}
+            </span>
+          </div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#2a4a5a;margin-top:8px;">
+            共 {len(records)} 筆買入 · 總成本 ${total_cost:,.0f}
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        # DCA table
+        with st.expander(f"📋  查看所有買入記錄（{len(records)} 筆）"):
+            rows = ""
+            for r in reversed(records):
+                cost_per = r["cost"]
+                curr_val = r["shares"] * (p_00631L or 0)
+                r_pnl    = curr_val - cost_per
+                r_col    = "#00ff88" if r_pnl >= 0 else "#ff3366"
+                rows += f"""<tr style="border-bottom:1px solid #1a2a3a;">
+                  <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#00d4ff;font-size:0.78rem;">{r['date']}</td>
+                  <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#e8f4f8;font-size:0.78rem;">{r['shares']:,}</td>
+                  <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#e8f4f8;font-size:0.78rem;">${r['price']:.2f}</td>
+                  <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:#5a7a8a;font-size:0.78rem;">${cost_per:,.0f}</td>
+                  <td style="padding:8px 12px;font-family:'Share Tech Mono',monospace;color:{r_col};font-size:0.78rem;">{r_pnl:+,.0f}</td>
+                </tr>"""
+            st.markdown(f"""<div class="alert-card-neutral" style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;">
+                <thead><tr style="border-bottom:2px solid #1e3a4a;">
+                  <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">日期</th>
+                  <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">股數</th>
+                  <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">買入價</th>
+                  <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">成本</th>
+                  <th style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">損益</th>
+                </tr></thead>
+                <tbody>{rows}</tbody>
+              </table></div>""", unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="alert-card-neutral" style="text-align:center;padding:24px;"><div style="font-family:Share Tech Mono,monospace;color:#5a7a8a;font-size:0.75rem;">尚無定額買入記錄<br>從左側新增第一筆</div></div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# ROW 7 — 娛樂基金罐子
+# ─────────────────────────────────────────────
+st.markdown('<br>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">[ 07 ]  娛樂基金罐子 · FUN FUND JAR</div>', unsafe_allow_html=True)
+
+fun_c1, fun_c2 = st.columns([2, 3])
+cur_month_str = datetime.now().strftime("%Y-%m")
+this_month_exp = [e for e in st.session_state.fun_exp if e.get("month") == cur_month_str]
+spent_this_month = sum(e["amount"] for e in this_month_exp)
+
+with fun_c1:
+    new_budget = st.number_input("每月娛樂預算 (TWD)", min_value=0, value=st.session_state.fun_budget, step=500, key="fun_budget_input")
+    if new_budget != st.session_state.fun_budget:
+        st.session_state.fun_budget = new_budget
+        _persist()
+
+    fun_amount = st.number_input("花費金額", min_value=1, value=500, step=100, key="fun_amt")
+    fun_label  = st.text_input("花在哪裡？", placeholder="e.g. 電影、聚餐、遊戲", key="fun_label")
+
+    if st.button("💸  記錄花費", use_container_width=True):
+        st.session_state.fun_exp.append({
+            "month":  cur_month_str,
+            "date":   datetime.now().strftime("%Y-%m-%d"),
+            "amount": fun_amount,
+            "label":  fun_label or "未分類",
+        })
+        _persist()
+        st.success(f"✅ 已記錄 ${fun_amount:,}")
+
+    if this_month_exp:
+        if st.button("🗑  刪除本月最後一筆", use_container_width=True, key="fun_del"):
+            # Remove last entry from this month
+            for i in range(len(st.session_state.fun_exp)-1, -1, -1):
+                if st.session_state.fun_exp[i].get("month") == cur_month_str:
+                    st.session_state.fun_exp.pop(i)
+                    break
+            _persist()
+            st.rerun()
+
+with fun_c2:
+    budget = st.session_state.fun_budget
+    remaining = budget - spent_this_month
+    used_pct  = min(spent_this_month / budget * 100, 100) if budget > 0 else 0
+    rem_col   = "#00ff88" if remaining >= 0 else "#ff3366"
+    bar_class = "progress-fill-green" if used_pct < 70 else ("progress-fill-amber" if used_pct < 100 else "progress-fill-red")
+    days_in_month = 31
+    today_day = datetime.now().day
+    daily_budget = remaining / max(days_in_month - today_day, 1) if remaining > 0 else 0
+
+    st.markdown(f"""
+    <div class="alert-card-neutral">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;
+                  letter-spacing:0.1em;margin-bottom:8px;">{cur_month_str} 娛樂預算</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <div class="kpi-label">已花費</div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:1.1rem;color:#ffaa00;">${spent_this_month:,.0f}</div>
+          <div class="kpi-sub">{used_pct:.1f}% 預算</div>
+        </div>
+        <div>
+          <div class="kpi-label">剩餘可花</div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:1.1rem;color:{rem_col};">${remaining:,.0f}</div>
+          <div class="kpi-sub">{'✅ 預算內' if remaining >= 0 else '⚠ 超支'}</div>
+        </div>
+        <div>
+          <div class="kpi-label">每日剩餘額度</div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:1.1rem;color:#00d4ff;">${daily_budget:,.0f}</div>
+          <div class="kpi-sub">剩 {days_in_month - today_day} 天</div>
+        </div>
+      </div>
+      <div class="kpi-label">本月使用進度</div>
+      <div class="progress-wrap">
+        <div class="{bar_class}" style="width:{used_pct:.1f}%;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px;">
+        <span style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;">${spent_this_month:,.0f} 已花</span>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;">預算 ${budget:,.0f}</span>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    if this_month_exp:
+        with st.expander(f"📋  本月花費明細（{len(this_month_exp)} 筆）"):
+            rows = ""
+            for e in reversed(this_month_exp):
+                rows += f"""<tr style="border-bottom:1px solid #1a2a3a;">
+                  <td style="padding:7px 12px;font-family:'Share Tech Mono',monospace;color:#5a7a8a;font-size:0.78rem;">{e['date']}</td>
+                  <td style="padding:7px 12px;font-family:'Share Tech Mono',monospace;color:#e8f4f8;font-size:0.78rem;">{e['label']}</td>
+                  <td style="padding:7px 12px;font-family:'Share Tech Mono',monospace;color:#ffaa00;font-size:0.78rem;">${e['amount']:,}</td>
+                </tr>"""
+            st.markdown(f"""<div class="alert-card-neutral" style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;">
+                <thead><tr style="border-bottom:2px solid #1e3a4a;">
+                  <th style="padding:7px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">日期</th>
+                  <th style="padding:7px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">項目</th>
+                  <th style="padding:7px 12px;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">金額</th>
+                </tr></thead>
+                <tbody>{rows}</tbody>
+              </table></div>""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# ROW 8 — 大額支出預存計畫
+# ─────────────────────────────────────────────
+st.markdown('<br>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">[ 08 ]  大額支出預存計畫 · BIG EXPENSE PLANNER</div>', unsafe_allow_html=True)
+
+big_c1, big_c2 = st.columns([2, 3])
+
+with big_c1:
+    st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.7rem;color:#5a7a8a;margin-bottom:8px;letter-spacing:0.08em;">新增預存計畫</div>', unsafe_allow_html=True)
+    big_name   = st.text_input("計畫名稱", placeholder="e.g. 日本旅遊、新電腦", key="big_name")
+    big_target = st.number_input("目標金額 (TWD)", min_value=100, value=50000, step=1000, key="big_target")
+    big_date   = st.date_input("預計花費日期", value=date.today() + timedelta(days=180), key="big_date")
+    big_saved  = st.number_input("已存金額 (TWD)", min_value=0, value=0, step=1000, key="big_saved")
+
+    if st.button("➕  新增計畫", use_container_width=True):
+        if big_name:
+            st.session_state.big_plans.append({
+                "name":    big_name,
+                "target":  big_target,
+                "date":    str(big_date),
+                "saved":   big_saved,
+            })
+            _persist()
+            st.success(f"✅ {big_name} 計畫已新增")
+        else:
+            st.warning("請輸入計畫名稱")
+
+with big_c2:
+    if st.session_state.big_plans:
+        for idx, plan in enumerate(st.session_state.big_plans):
+            target    = plan["target"]
+            saved     = plan["saved"]
+            remaining = target - saved
+            days_left = (date.fromisoformat(plan["date"]) - date.today()).days
+            months_left = max(days_left / 30.44, 0.1)
+            monthly_need = remaining / months_left if remaining > 0 else 0
+            pct  = min(saved / target * 100, 100) if target > 0 else 0
+            pct_col  = "#00ff88" if pct >= 100 else ("#ffaa00" if pct >= 50 else "#00d4ff")
+            bar_cls  = "progress-fill-green" if pct >= 100 else ("progress-fill-amber" if pct >= 50 else "progress-fill-green")
+            urgent   = days_left < 30
+            urg_col  = "#ff3366" if urgent else "#5a7a8a"
+
+            card_html = f"""
+            <div class="alert-card-neutral" style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+                <span style="font-family:'Orbitron',monospace;font-size:0.85rem;color:#00d4ff;">{plan['name']}</span>
+                <span style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:{urg_col};">
+                  {'🔴 ' if urgent else ''}剩 {days_left} 天
+                </span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                  <div class="kpi-label">目標</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:0.9rem;color:#e8f4f8;">${target:,}</div>
+                </div>
+                <div>
+                  <div class="kpi-label">已存</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:0.9rem;color:#00ff88;">${saved:,}</div>
+                </div>
+                <div>
+                  <div class="kpi-label">缺口</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:0.9rem;color:#ffaa00;">${remaining:,}</div>
+                </div>
+                <div>
+                  <div class="kpi-label">每月需存</div>
+                  <div style="font-family:'Share Tech Mono',monospace;font-size:0.9rem;color:#ff3366;">${monthly_need:,.0f}</div>
+                </div>
+              </div>
+              <div class="progress-wrap">
+                <div class="{bar_cls}" style="width:{pct:.1f}%;"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px;">
+                <span style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:{pct_col};">{pct:.1f}% 完成</span>
+                <span style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:#5a7a8a;">{plan['date']}</span>
+              </div>
+            </div>"""
+            st.markdown(card_html, unsafe_allow_html=True)
+
+            bc1, bc2, bc3 = st.columns([2, 2, 1])
+            with bc1:
+                add_amt = st.number_input(f"追加存入 #{idx+1}", min_value=0, value=0, step=500, key=f"add_{idx}", label_visibility="collapsed")
+            with bc2:
+                if st.button(f"💰 追加存入 #{idx+1}", key=f"addbtn_{idx}", use_container_width=True):
+                    if add_amt > 0:
+                        st.session_state.big_plans[idx]["saved"] += add_amt
+                        _persist()
+                        st.rerun()
+            with bc3:
+                if st.button("🗑", key=f"delbig_{idx}", use_container_width=True):
+                    st.session_state.big_plans.pop(idx)
+                    _persist()
+                    st.rerun()
+    else:
+        st.markdown('<div class="alert-card-neutral" style="text-align:center;padding:24px;"><div style="font-family:Share Tech Mono,monospace;color:#5a7a8a;font-size:0.75rem;">尚無預存計畫<br>新增你的第一個大額支出目標</div></div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# AUTO-SAVE ALL APP DATA TO LOCALSTORAGE
+# ─────────────────────────────────────────────
+_all_data = _json.dumps({
+    "snap": _encode(st.session_state.snapshots),
+    "dca":  _encode(st.session_state.dca_records),
+    "fun":  _encode(st.session_state.fun_exp),
+    "big":  _encode(st.session_state.big_plans),
+    "fcfg": _encode({"budget": st.session_state.fun_budget}),
+})
+st.components.v1.html(f"""<script>
+(function(){{
+  try {{
+    var d = {_all_data};
+    var p = window.parent;
+    Object.keys(d).forEach(function(k){{ p.localStorage.setItem("fire_data_"+k, d[k]); }});
+  }} catch(e) {{}}
+}})();
+</script>""", height=0)
+
+
 # ROW 5 — STRATEGY SOP
 # ─────────────────────────────────────────────
 st.markdown('<br>', unsafe_allow_html=True)
