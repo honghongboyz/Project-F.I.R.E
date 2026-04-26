@@ -1510,6 +1510,205 @@ st.components.v1.html(f"""<script>
 </script>""", height=0)
 
 
+
+# ─────────────────────────────────────────────
+# ROW 9 — 月薪配置儀表板 SALARY ALLOCATOR
+# ─────────────────────────────────────────────
+st.markdown('<br>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">[ 09 ]  月薪配置儀表板 · SALARY ALLOCATOR</div>', unsafe_allow_html=True)
+
+if "salary_cfg" not in st.session_state:
+    _scfg = _decode(st.query_params.get("scfg", ""), {})
+    st.session_state.salary_cfg = {
+        "salary":        _scfg.get("salary",        60000),
+        "dca_amt":       _scfg.get("dca_amt",        30000),
+        "living":        _scfg.get("living",         15000),
+        "emergency_pct": _scfg.get("emergency_pct",  5),
+        "rigid":         _scfg.get("rigid", [
+            {"name":"房租","amount":0},{"name":"保險","amount":0},
+            {"name":"電信費","amount":0},{"name":"訂閱服務","amount":0},
+        ]),
+    }
+
+sal = st.session_state.salary_cfg
+sal_col1, sal_col2 = st.columns([2, 3])
+
+with sal_col1:
+    new_salary = st.number_input("月薪實領 (TWD)", min_value=0, value=sal["salary"], step=1000, key="sal_salary")
+    new_dca    = st.number_input("定期定額 00631L", min_value=0, value=sal["dca_amt"], step=1000, key="sal_dca")
+    new_living = st.number_input("生活費預算", min_value=0, value=sal["living"], step=500, key="sal_living")
+    new_ep     = st.number_input("緊急備用金提撥 (%)", min_value=0, max_value=30, value=sal["emergency_pct"], step=1, key="sal_ep",
+                                  help="建議 3-5%，目標 = 6 個月生活費")
+    st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.65rem;color:#5a7a8a;margin:8px 0 4px;">剛性支出明細</div>', unsafe_allow_html=True)
+    rigid_items = sal["rigid"].copy()
+    updated_rigid = []
+    for i, item in enumerate(rigid_items):
+        rc1, rc2 = st.columns([3, 2])
+        with rc1: nm = st.text_input(f"項目{i+1}", value=item["name"], key=f"rname_{i}", label_visibility="collapsed")
+        with rc2: am = st.number_input(f"金額{i+1}", min_value=0, value=item["amount"], step=100, key=f"ramt_{i}", label_visibility="collapsed")
+        updated_rigid.append({"name": nm, "amount": am})
+    rc1, rc2 = st.columns(2)
+    with rc1:
+        if st.button("➕ 新增", use_container_width=True, key="rigid_add"):
+            updated_rigid.append({"name":"新項目","amount":0})
+    with rc2:
+        if st.button("🗑 刪除", use_container_width=True, key="rigid_del") and updated_rigid:
+            updated_rigid.pop()
+    st.session_state.salary_cfg = {"salary":new_salary,"dca_amt":new_dca,"living":new_living,"emergency_pct":new_ep,"rigid":updated_rigid}
+    st.query_params.update({"scfg": _encode(st.session_state.salary_cfg)})
+
+with sal_col2:
+    sal         = st.session_state.salary_cfg
+    salary      = sal["salary"]
+    dca_amt     = sal["dca_amt"]
+    living_amt  = sal["living"]
+    ep_amt      = round(salary * sal["emergency_pct"] / 100)
+    fun_amt_cfg = st.session_state.fun_budget
+    rigid_total = sum(r["amount"] for r in sal["rigid"])
+    loan_int_mo = round(monthly_interest)
+    total_alloc = dca_amt + living_amt + ep_amt + fun_amt_cfg + rigid_total + loan_int_mo
+    remainder   = salary - total_alloc
+    rem_col     = "#00ff88" if remainder >= 0 else "#ff3366"
+
+    pie_labels = ["定期定額","剛性支出","生活費","娛樂基金","緊急備用金","質押利息","結餘"]
+    pie_vals   = [dca_amt, rigid_total, living_amt, fun_amt_cfg, ep_amt, loan_int_mo, max(remainder,0)]
+    pie_colors = ["#00ff88","#ff6688","#00d4ff","#ffaa00","#aa88ff","#ff3366","#1e3a4a"]
+
+    pie_html = f"""<html><body style="margin:0;background:transparent;display:flex;gap:12px;align-items:center;padding:4px 0;">
+<canvas id="pc" width="150" height="150"></canvas>
+<div id="lg" style="font-family:Share Tech Mono,monospace;font-size:0.62rem;line-height:1.9;"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+var lb={_json.dumps(pie_labels)},vl={_json.dumps(pie_vals)},cl={_json.dumps(pie_colors)};
+var lg=document.getElementById('lg');
+lb.forEach(function(l,i){{if(vl[i]>0)lg.innerHTML+='<div><span style="color:'+cl[i]+'">■</span> '+l+' $'+vl[i].toLocaleString()+'</div>';}});
+new Chart(document.getElementById('pc').getContext('2d'),{{type:'doughnut',data:{{labels:lb,datasets:[{{data:vl,backgroundColor:cl,borderWidth:0}}]}},options:{{responsive:false,plugins:{{legend:{{display:false}}}}}}}});
+</script></body></html>"""
+    st.components.v1.html(pie_html, height=165)
+
+    items = [
+        ("定期定額 00631L", dca_amt,     "#00ff88", "📈 複利引擎，優先扣款"),
+        ("剛性支出",        rigid_total,  "#ff6688", "🏠 " + " · ".join([f"{r['name']} {r['amount']:,}" for r in sal["rigid"] if r["amount"]>0]) or "固定費用"),
+        ("生活費",          living_amt,   "#00d4ff", "🛒 飲食、交通、日常"),
+        ("娛樂基金",        fun_amt_cfg,  "#ffaa00", "🎮 每月限額控管"),
+        ("緊急備用金提撥",  ep_amt,       "#aa88ff", f"🛡 薪資{sal['emergency_pct']}%，目標6個月生活費"),
+        ("質押月利息",      loan_int_mo,  "#ff3366", f"🏦 年利率{pledge_rate:.2f}%"),
+    ]
+    rows_html = ""
+    for name, amt, col, note in items:
+        pct = amt/salary*100 if salary > 0 else 0
+        rows_html += f"""<tr style="border-bottom:1px solid #1a2a3a;">
+          <td style="padding:8px 12px;font-family:Share Tech Mono,monospace;color:{col};font-size:0.78rem;">{name}</td>
+          <td style="padding:8px 12px;font-family:Share Tech Mono,monospace;color:#e8f4f8;font-size:0.78rem;text-align:right;">${amt:,}</td>
+          <td style="padding:8px 12px;font-family:Share Tech Mono,monospace;color:#5a7a8a;font-size:0.72rem;text-align:right;">{pct:.1f}%</td>
+          <td style="padding:8px 12px;font-family:Share Tech Mono,monospace;color:#2a4a5a;font-size:0.65rem;">{note}</td>
+        </tr>"""
+    rem_advice = f"💡 下月加碼 00631L 或存備用金" if remainder > 0 else (f"⚠ 超支 ${abs(remainder):,}" if remainder < 0 else "✅ 收支平衡")
+    st.markdown(f"""<div class="alert-card-neutral">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:2px solid #1e3a4a;">
+          <th style="padding:8px 12px;font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">配置項目</th>
+          <th style="padding:8px 12px;font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#5a7a8a;text-align:right;">金額</th>
+          <th style="padding:8px 12px;font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#5a7a8a;text-align:right;">佔薪</th>
+          <th style="padding:8px 12px;font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#5a7a8a;text-align:left;">說明</th>
+        </tr></thead>
+        <tbody>{rows_html}</tbody>
+        <tfoot><tr style="border-top:2px solid #1e3a4a;">
+          <td style="padding:10px 12px;font-family:Orbitron,monospace;font-size:0.8rem;color:#00d4ff;">本月結餘</td>
+          <td style="padding:10px 12px;font-family:Share Tech Mono,monospace;font-size:1rem;color:{rem_col};text-align:right;font-weight:bold;">${remainder:,}</td>
+          <td style="padding:10px 12px;font-family:Share Tech Mono,monospace;font-size:0.8rem;color:{rem_col};text-align:right;">{remainder/salary*100:.1f}%</td>
+          <td style="padding:10px 12px;font-family:Share Tech Mono,monospace;font-size:0.7rem;color:{rem_col};">{rem_advice}</td>
+        </tfoot>
+      </table></div>""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# ROW 10 — 獎金配置器 BONUS ALLOCATOR
+# ─────────────────────────────────────────────
+st.markdown('<br>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">[ 10 ]  獎金配置器 · BONUS ALLOCATOR</div>', unsafe_allow_html=True)
+
+bon_c1, bon_c2 = st.columns([2, 3])
+
+with bon_c1:
+    bonus_type   = st.selectbox("獎金類型", ["年終獎金","績效獎金","分紅","其他"], key="bonus_type")
+    bonus_amount = st.number_input("獎金金額 (稅前)", min_value=0, value=100000, step=10000, key="bonus_amount")
+    bonus_tax    = st.number_input("預估稅率 (%)", min_value=0, max_value=40, value=10, step=1, key="bonus_tax",
+                                    help="獎金通常含 10% 二代健保補充保費＋所得稅")
+    st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.65rem;color:#5a7a8a;margin:10px 0 4px;">配置明細</div>', unsafe_allow_html=True)
+    bon_pledge    = st.number_input("① 提前還質押借款", min_value=0, value=0, step=10000, key="bon_pledge",
+                                     help=f"目前質押 ${pledge_loan:,}，還款可降低利息")
+    bon_emergency = st.number_input("② 補充緊急備用金", min_value=0, value=0, step=5000, key="bon_emergency",
+                                     help="建議目標：6 個月生活費")
+    bon_bigfill   = st.number_input("③ 填補大額支出計畫", min_value=0, value=0, step=5000, key="bon_bigfill")
+    bon_dca_extra = st.number_input("④ 加碼 00631L", min_value=0, value=0, step=5000, key="bon_dca",
+                                     help="一次性加碼，加速 100 萬達成")
+    bon_save      = st.number_input("⑤ 存定存/備用現金", min_value=0, value=0, step=5000, key="bon_save")
+
+with bon_c2:
+    after_tax    = round(bonus_amount * (1 - bonus_tax / 100))
+    total_alloc  = bon_pledge + bon_emergency + bon_bigfill + bon_dca_extra + bon_save
+    unalloc      = after_tax - total_alloc
+    unalloc_col  = "#00ff88" if unalloc >= 0 else "#ff3366"
+    bar_pct      = min(total_alloc / after_tax * 100, 100) if after_tax > 0 else 0
+    interest_saved = bon_pledge * (pledge_rate / 100)
+    cur_dca_val  = (p_00631L or 0) * shares_00631L
+    new_dca_val  = cur_dca_val + bon_dca_extra
+    new_dca_pct  = min(new_dca_val / 1_000_000 * 100, 100)
+    em_target    = st.session_state.salary_cfg["living"] * 6
+
+    st.markdown(f"""<div class="alert-card-neutral">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div><div class="kpi-label">稅後到手</div>
+          <div style="font-family:Orbitron,monospace;font-size:1.1rem;color:#00d4ff;">${after_tax:,}</div>
+          <div class="kpi-sub">稅率 {bonus_tax}%</div></div>
+        <div><div class="kpi-label">已配置</div>
+          <div style="font-family:Orbitron,monospace;font-size:1.1rem;color:#ffaa00;">${total_alloc:,}</div>
+          <div class="kpi-sub">{bar_pct:.1f}%</div></div>
+        <div><div class="kpi-label">未配置餘額</div>
+          <div style="font-family:Orbitron,monospace;font-size:1.1rem;color:{unalloc_col};">${unalloc:,}</div>
+          <div class="kpi-sub">{'✅ 仍有結餘' if unalloc >= 0 else '⚠ 超出'}</div></div>
+      </div>
+      <div class="progress-wrap" style="margin-bottom:14px;">
+        <div class="progress-fill-green" style="width:{bar_pct:.1f}%;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div style="background:#080c10;border:1px solid #1e3a4a;border-radius:6px;padding:12px;">
+          <div class="kpi-label">加碼後 00631L 進度</div>
+          <div style="font-family:Share Tech Mono,monospace;font-size:1rem;color:#00ff88;">{new_dca_pct:.1f}%</div>
+          <div class="progress-wrap"><div class="progress-fill-green" style="width:{new_dca_pct:.1f}%;"></div></div>
+          <div class="kpi-sub">${new_dca_val:,.0f} / $1,000,000</div>
+        </div>
+        <div style="background:#080c10;border:1px solid #1e3a4a;border-radius:6px;padding:12px;">
+          <div class="kpi-label">還款後每年省息</div>
+          <div style="font-family:Share Tech Mono,monospace;font-size:1rem;color:#00ff88;">${interest_saved:,.0f}</div>
+          <div class="kpi-sub">還款 ${bon_pledge:,} × {pledge_rate:.2f}%</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid #1e3a4a;padding-top:10px;">
+        <div style="font-family:Share Tech Mono,monospace;font-size:0.65rem;color:#5a7a8a;line-height:2.1;">
+          <span style="color:#00d4ff;">📋 建議優先順序</span><br>
+          <span style="color:#aa88ff;">① 緊急備用金</span> — 目標 {em_target:,} TWD（6個月生活費），先補滿安全網<br>
+          <span style="color:#00ff88;">② 加碼 00631L</span> — 距 100 萬目標差 ${max(1_000_000-cur_dca_val,0):,.0f}，獎金是最快捷徑<br>
+          <span style="color:#ff6688;">③ 還款評估</span> — 每還 10 萬年省 ${100000*pledge_rate/100:,.0f}，報酬率 {pledge_rate:.2f}%<br>
+          <span style="color:#ffaa00;">④ 大額計畫</span> — 填補最近到期的支出計畫，免臨時動用投資<br>
+          <span style="color:#1e3a4a;background:#00d4ff;padding:0 4px;border-radius:2px;">⑤ 定存</span> — 確定短期內會用到的資金才存定存，其餘投入 006208
+        </div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    if unalloc > 0:
+        best_use = "加碼 00631L" if new_dca_pct < 100 else "補充 006208 持倉"
+        st.markdown(f"""<div class="alert-card-green" style="margin-top:8px;">
+          <div style="font-family:Share Tech Mono,monospace;font-size:0.75rem;color:#00ff88;">
+            💡 還有 ${unalloc:,} 未配置 — 建議用於：{best_use}
+          </div></div>""", unsafe_allow_html=True)
+    elif unalloc < 0:
+        st.markdown(f"""<div class="alert-card-red" style="margin-top:8px;">
+          <div style="font-family:Share Tech Mono,monospace;font-size:0.75rem;color:#ff3366;">
+            ⚠ 配置超出稅後獎金 ${abs(unalloc):,}，請調整各項金額
+          </div></div>""", unsafe_allow_html=True)
+
+
 # ROW 5 — STRATEGY SOP
 # ─────────────────────────────────────────────
 st.markdown('<br>', unsafe_allow_html=True)
