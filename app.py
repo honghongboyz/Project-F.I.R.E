@@ -295,21 +295,30 @@ with tabs[0]:
         with ei4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("💾 儲存股數", use_container_width=True, key="quick_save"):
-                st.session_state["i_s1"] = s_006208
-                st.session_state["i_s2"] = s_00631L
-                st.session_state["i_s3"] = s_2330
-                save_all()
-                st.success("✅ 股數已儲存！")
+                st.query_params.update({
+                    "s1": str(st.session_state["quick_s1"]),
+                    "s2": str(st.session_state["quick_s2"]),
+                    "s3": str(st.session_state["quick_s3"]),
+                    "pl": str(st.session_state.get("i_pl", pledge_loan)),
+                    "pr": str(st.session_state.get("i_pr", pledge_rate)),
+                    "pe": str(st.session_state.get("i_pe", pledge_expiry)),
+                    "tn": str(st.session_state.get("i_tn", target_net)),
+                    "mi": str(st.session_state.get("i_mi", monthly_inv)),
+                    "wr": str(st.session_state.get("i_wr", withdraw_rt)),
+                    "dob": str(st.session_state.get("i_dob", dob)),
+                    "dca": enc(st.session_state.get("dca_records", [])),
+                })
+                st.success("✅ 儲存成功！正在重新載入...")
                 st.rerun()
         st.markdown(
             '<div style="font-size:.75rem;color:var(--muted);margin-top:4px;">'
-            '⚠ 修改後請按「💾 儲存股數」，數值才會更新到報價卡片'
+            '填入最新股數後按「💾 儲存股數」即可更新所有數據'
             '</div>', unsafe_allow_html=True)
 
-    # 重新計算市值（用最新 quick inputs）
-    if "quick_s1" in st.session_state: s_006208 = st.session_state["quick_s1"]
-    if "quick_s2" in st.session_state: s_00631L = st.session_state["quick_s2"]
-    if "quick_s3" in st.session_state: s_2330   = st.session_state["quick_s3"]
+    # 重新計算市值（用 expander 內的即時輸入值）
+    s_006208 = st.session_state.get("quick_s1", s_006208)
+    s_00631L = st.session_state.get("quick_s2", s_00631L)
+    s_2330   = st.session_state.get("quick_s3", s_2330)
     mv8 = p8*s_006208; mv6 = p6*s_00631L; mv3 = p3*s_2330
     total_mv  = mv8+mv6+mv3
     net_asset = total_mv - pledge_loan
