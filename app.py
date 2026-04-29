@@ -280,6 +280,42 @@ tabs = st.tabs([
 # TAB 1 — 資產總覽
 # ════════════════════════════════════════════
 with tabs[0]:
+    # ── 股數快速輸入區 ──
+    with st.expander("✏️  更新持股數量（點此展開）", expanded=False):
+        ei1, ei2, ei3, ei4 = st.columns(4)
+        with ei1:
+            s_006208 = st.number_input("006208 股數", min_value=0,
+                value=s_006208, step=100, key="quick_s1")
+        with ei2:
+            s_00631L = st.number_input("00631L 股數", min_value=0,
+                value=s_00631L, step=100, key="quick_s2")
+        with ei3:
+            s_2330 = st.number_input("2330 股數", min_value=0,
+                value=s_2330, step=1, key="quick_s3")
+        with ei4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("💾 儲存股數", use_container_width=True, key="quick_save"):
+                st.session_state["i_s1"] = s_006208
+                st.session_state["i_s2"] = s_00631L
+                st.session_state["i_s3"] = s_2330
+                save_all()
+                st.success("✅ 股數已儲存！")
+                st.rerun()
+        st.markdown(
+            '<div style="font-size:.75rem;color:var(--muted);margin-top:4px;">'
+            '⚠ 修改後請按「💾 儲存股數」，數值才會更新到報價卡片'
+            '</div>', unsafe_allow_html=True)
+
+    # 重新計算市值（用最新 quick inputs）
+    if "quick_s1" in st.session_state: s_006208 = st.session_state["quick_s1"]
+    if "quick_s2" in st.session_state: s_00631L = st.session_state["quick_s2"]
+    if "quick_s3" in st.session_state: s_2330   = st.session_state["quick_s3"]
+    mv8 = p8*s_006208; mv6 = p6*s_00631L; mv3 = p3*s_2330
+    total_mv  = mv8+mv6+mv3
+    net_asset = total_mv - pledge_loan
+    pledge_ratio = (mv8/pledge_loan*100) if pledge_loan>0 else 9999
+    conv_pct  = min(mv6/1_000_000*100, 100)
+
     # Ticker Cards
     st.markdown('<div class="sec">[ 01 ]  即時報價</div>', unsafe_allow_html=True)
 
