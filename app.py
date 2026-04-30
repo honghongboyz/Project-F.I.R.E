@@ -177,62 +177,84 @@ def months_to_fire_rate(net, target, monthly, annual_rate):
     return m
 
 # ─────────────────────────────────────────────
-# SESSION STATE INIT
+# PERSISTENT SETTINGS — single base64 param "cfg"
+# Works across browser refresh; user saves the URL as bookmark
 # ─────────────────────────────────────────────
-if "dca_records" not in st.session_state:
-    st.session_state.dca_records = dec(qp("dca","",str), [])
+_DEFAULTS = {
+    "s1": 12000, "s2": 7000, "s3": 1081,
+    "pl": 1500000, "pr": 2.4, "pe": str(date.today()+timedelta(days=180)),
+    "tn": 50000000, "mi": 38000, "wr": 4.0,
+    "dob": "1992-12-14", "dca": [],
+}
+
+def _load_cfg():
+    raw = st.query_params.get("cfg", "")
+    if raw:
+        loaded = dec(raw, {})
+        return {**_DEFAULTS, **loaded}
+    # Fallback: try individual params (legacy)
+    d = dict(_DEFAULTS)
+    try:
+        if "s1"  in st.query_params: d["s1"]  = int(st.query_params["s1"])
+        if "s2"  in st.query_params: d["s2"]  = int(st.query_params["s2"])
+        if "s3"  in st.query_params: d["s3"]  = int(st.query_params["s3"])
+        if "pl"  in st.query_params: d["pl"]  = int(st.query_params["pl"])
+        if "pr"  in st.query_params: d["pr"]  = float(st.query_params["pr"])
+        if "pe"  in st.query_params: d["pe"]  = st.query_params["pe"]
+        if "tn"  in st.query_params: d["tn"]  = int(st.query_params["tn"])
+        if "mi"  in st.query_params: d["mi"]  = int(st.query_params["mi"])
+        if "wr"  in st.query_params: d["wr"]  = float(st.query_params["wr"])
+        if "dob" in st.query_params: d["dob"] = st.query_params["dob"]
+        if "dca" in st.query_params: d["dca"] = dec(st.query_params["dca"], [])
+    except: pass
+    return d
+
+if "cfg" not in st.session_state:
+    st.session_state.cfg = _load_cfg()
 if "panic_mode" not in st.session_state:
     st.session_state.panic_mode = False
 
+_C = st.session_state.cfg  # shorthand
+
+def _save_cfg(new_vals: dict):
+    st.session_state.cfg = {**st.session_state.cfg, **new_vals}
+    st.query_params.update({"cfg": enc(st.session_state.cfg)})
+
 def save_all():
-    st.query_params.update({
-        "s1": str(st.session_state.get("i_s1",12000)),
-        "s2": str(st.session_state.get("i_s2",7000)),
-        "s3": str(st.session_state.get("i_s3",1081)),
-        "pl": str(st.session_state.get("i_pl",1500000)),
-        "pr": str(st.session_state.get("i_pr",2.4)),
-        "pe": str(st.session_state.get("i_pe", date.today()+timedelta(days=180))),
-        "tn": str(st.session_state.get("i_tn",50000000)),
-        "mi": str(st.session_state.get("i_mi",38000)),
-        "wr": str(st.session_state.get("i_wr",4.0)),
-        "dob": str(st.session_state.get("i_dob",date(1992,12,14))),
-        "dca": enc(st.session_state.get("dca_records",[])),
-    })
+    _save_cfg({})  # just flush current cfg to URL
 
 # ─────────────────────────────────────────────
-# SIDEBAR
+# SIDEBAR — minimal, just panic + refresh
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## ⚙️ 持股與目標設定")
-
-    st.markdown("#### 📊 持股數量")
-    s_006208 = st.number_input("006208 股數", min_value=0, value=qp("s1",12000,int), step=100, key="i_s1")
-    s_00631L = st.number_input("00631L 股數", min_value=0, value=qp("s2",7000, int), step=100, key="i_s2")
-    s_2330   = st.number_input("2330 股數",   min_value=0, value=qp("s3",1081, int), step=1,   key="i_s3")
-
-    st.markdown("#### 🏦 質押條件")
-    pledge_loan   = st.number_input("質押借款 (TWD)", min_value=0, value=qp("pl",1500000,int), step=10000, key="i_pl")
-    pledge_rate   = st.number_input("質押年利率 (%)", min_value=0.0, value=qp("pr",2.4,float), step=0.1, format="%.2f", key="i_pr")
-    pledge_expiry = st.date_input("到期日", value=qp("pe", date.today()+timedelta(days=180), date.fromisoformat), key="i_pe")
-
-    st.markdown("#### 🎯 退休目標")
-    target_net  = st.number_input("目標淨資產 (TWD)", min_value=1000000, value=qp("tn",50000000,int), step=1000000, key="i_tn")
-    monthly_inv = st.number_input("每月定額投入 (TWD)", min_value=0, value=qp("mi",38000,int), step=1000, key="i_mi")
-    withdraw_rt = st.number_input("安全提領率 (%)", 1.0, 10.0, value=qp("wr",4.0,float), step=0.1, format="%.1f", key="i_wr")
-    dob         = st.date_input("出生年月日", value=qp("dob",date(1992,12,14),date.fromisoformat), min_value=date(1950,1,1), key="i_dob")
-
+    st.markdown("## ⚙️ 快捷操作")
+    if st.button("🔄 更新報價", use_container_width=True):
+        st.cache_data.clear(); st.rerun()
     st.markdown("---")
-    if st.button("💾 儲存設定", use_container_width=True): save_all(); st.success("✅ 已儲存！")
-    if st.button("🔄 更新報價", use_container_width=True): st.cache_data.clear(); st.rerun()
-
-    st.markdown("---")
-    # PANIC BUTTON
-    panic_label = "🔓 顯示金額" if st.session_state.panic_mode else "🚨 隱藏金額 (Panic)"
+    panic_label = "🔓 顯示金額" if st.session_state.panic_mode else "🚨 隱藏金額"
     if st.button(panic_label, use_container_width=True):
         st.session_state.panic_mode = not st.session_state.panic_mode
         st.rerun()
-    if st.session_state.panic_mode:
-        st.markdown('<div style="font-size:.75rem;color:var(--red);text-align:center;">⚠ 金額隱藏中，僅顯示達成率</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown(
+        '<div style="font-size:.75rem;color:var(--muted);line-height:1.8;">'
+        '⚙️ 所有設定請至<br>'
+        '<b style="color:var(--cyan);">「⚙️ 設定」分頁</b><br>'
+        '修改並儲存</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# READ SETTINGS FROM SESSION STATE
+# ─────────────────────────────────────────────
+s_006208    = int(_C["s1"])
+s_00631L    = int(_C["s2"])
+s_2330      = int(_C["s3"])
+pledge_loan = int(_C["pl"])
+pledge_rate = float(_C["pr"])
+pledge_expiry = date.fromisoformat(str(_C["pe"])) if isinstance(_C["pe"], str) else _C["pe"]
+target_net  = int(_C["tn"])
+monthly_inv = int(_C["mi"])
+withdraw_rt = float(_C["wr"])
+dob         = date.fromisoformat(str(_C["dob"])) if isinstance(_C["dob"], str) else _C["dob"]
 
 # ─────────────────────────────────────────────
 # FETCH DATA
@@ -274,96 +296,13 @@ tabs = st.tabs([
     "🎯 退休預估",
     "📋 定期定額",
     "💼 收入配置",
+    "⚙️ 設定",
 ])
 
 # ════════════════════════════════════════════
 # TAB 1 — 資產總覽
 # ════════════════════════════════════════════
 with tabs[0]:
-    # ── 股數快速輸入區 ──
-    with st.expander("✏️  更新持股數量（點此展開）", expanded=False):
-        ei1, ei2, ei3, ei4 = st.columns(4)
-        with ei1:
-            s_006208 = st.number_input("006208 股數", min_value=0,
-                value=s_006208, step=100, key="quick_s1")
-        with ei2:
-            s_00631L = st.number_input("00631L 股數", min_value=0,
-                value=s_00631L, step=100, key="quick_s2")
-        with ei3:
-            s_2330 = st.number_input("2330 股數", min_value=0,
-                value=s_2330, step=1, key="quick_s3")
-        with ei4:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("💾 儲存股數", use_container_width=True, key="quick_save"):
-                st.query_params.update({
-                    "s1": str(st.session_state["quick_s1"]),
-                    "s2": str(st.session_state["quick_s2"]),
-                    "s3": str(st.session_state["quick_s3"]),
-                    "pl": str(st.session_state.get("i_pl", pledge_loan)),
-                    "pr": str(st.session_state.get("i_pr", pledge_rate)),
-                    "pe": str(st.session_state.get("i_pe", pledge_expiry)),
-                    "tn": str(st.session_state.get("i_tn", target_net)),
-                    "mi": str(st.session_state.get("i_mi", monthly_inv)),
-                    "wr": str(st.session_state.get("i_wr", withdraw_rt)),
-                    "dob": str(st.session_state.get("i_dob", dob)),
-                    "dca": enc(st.session_state.get("dca_records", [])),
-                })
-                st.success("✅ 儲存成功！正在重新載入...")
-                st.rerun()
-        st.markdown(
-            '<div style="font-size:.75rem;color:var(--muted);margin-top:4px;">'
-            '填入最新股數後按「💾 儲存股數」即可更新所有數據'
-            '</div>', unsafe_allow_html=True)
-
-    # 重新計算市值（用 expander 內的即時輸入值）
-    s_006208 = st.session_state.get("quick_s1", s_006208)
-    s_00631L = st.session_state.get("quick_s2", s_00631L)
-    s_2330   = st.session_state.get("quick_s3", s_2330)
-    mv8 = p8*s_006208; mv6 = p6*s_00631L; mv3 = p3*s_2330
-    total_mv  = mv8+mv6+mv3
-    net_asset = total_mv - pledge_loan
-    pledge_ratio = (mv8/pledge_loan*100) if pledge_loan>0 else 9999
-    conv_pct  = min(mv6/1_000_000*100, 100)
-
-    # Pledge settings quick edit
-    with st.expander("🏦  更新質押條件（點此展開）", expanded=False):
-        pe1, pe2, pe3, pe4 = st.columns(4)
-        with pe1:
-            q_pl = st.number_input("質押借款 (TWD)", min_value=0,
-                value=int(pledge_loan), step=10000, key="q_pl")
-        with pe2:
-            q_pr = st.number_input("質押年利率 (%)", min_value=0.0,
-                value=float(pledge_rate), step=0.1, format="%.2f", key="q_pr")
-        with pe3:
-            q_pe = st.date_input("到期日", value=pledge_expiry, key="q_pe")
-        with pe4:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("💾 儲存質押", use_container_width=True, key="q_pledge_save"):
-                st.query_params.update({
-                    "s1": str(st.session_state.get("quick_s1", s_006208)),
-                    "s2": str(st.session_state.get("quick_s2", s_00631L)),
-                    "s3": str(st.session_state.get("quick_s3", s_2330)),
-                    "pl": str(q_pl), "pr": str(q_pr), "pe": str(q_pe),
-                    "tn": str(st.session_state.get("i_tn", target_net)),
-                    "mi": str(st.session_state.get("i_mi", monthly_inv)),
-                    "wr": str(st.session_state.get("i_wr", withdraw_rt)),
-                    "dob": str(st.session_state.get("i_dob", dob)),
-                    "dca": enc(st.session_state.get("dca_records", [])),
-                })
-                st.success("✅ 質押條件已儲存！")
-                st.rerun()
-        st.markdown(
-            '<div style="font-size:.75rem;color:var(--amber);margin-top:4px;">'
-            '⚠ 若券商暫停質押，可將借款歸零；質押月利息將自動更新至收入配置'
-            '</div>', unsafe_allow_html=True)
-
-    # 用 quick input 更新質押參數
-    pledge_loan  = st.session_state.get("q_pl", pledge_loan) if "q_pl" in st.session_state else pledge_loan
-    pledge_rate  = st.session_state.get("q_pr", pledge_rate) if "q_pr" in st.session_state else pledge_rate
-    pledge_expiry= st.session_state.get("q_pe", pledge_expiry) if "q_pe" in st.session_state else pledge_expiry
-    monthly_int  = pledge_loan * pledge_rate / 100 / 12
-    pledge_ratio = (mv8/pledge_loan*100) if pledge_loan>0 else 9999
-
     # Ticker Cards
     st.markdown('<div class="sec">[ 01 ]  即時報價</div>', unsafe_allow_html=True)
 
@@ -928,6 +867,89 @@ with tabs[5]:
                 ③ 達標後轉入 006208 擴大質押槓桿
               </div>
             </div>""", unsafe_allow_html=True)
+
+# ════════════════════════════════════════════
+# TAB 7 — ⚙️ 設定（永久儲存）
+# ════════════════════════════════════════════
+with tabs[6]:
+    st.markdown('<div class="sec">[ 09 ]  設定 · SETTINGS</div>', unsafe_allow_html=True)
+
+    st.markdown("""<div class="card-amber" style='margin-bottom:18px;padding:14px 18px;'>
+      <div style='font-size:.9rem;color:var(--amber);line-height:1.8;'>
+        📱 <b>手機用戶注意：</b>修改後請按「💾 儲存所有設定」，設定會在本次瀏覽器會話中保持。<br>
+        若要跨裝置或重新開啟後仍有效，請複製下方「我的專屬連結」並儲存為書籤。
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    set_c1, set_c2 = st.columns(2)
+
+    with set_c1:
+        st.markdown("#### 📊 持股數量")
+        new_s1 = st.number_input("006208 股數", min_value=0, value=int(_C["s1"]), step=100, key="set_s1")
+        new_s2 = st.number_input("00631L 股數", min_value=0, value=int(_C["s2"]), step=100, key="set_s2")
+        new_s3 = st.number_input("2330 股數",   min_value=0, value=int(_C["s3"]), step=1,   key="set_s3")
+
+        st.markdown("#### 🏦 質押條件")
+        new_pl = st.number_input("質押借款 (TWD)", min_value=0, value=int(_C["pl"]), step=10000, key="set_pl")
+        new_pr = st.number_input("質押年利率 (%)", min_value=0.0, value=float(_C["pr"]), step=0.1, format="%.2f", key="set_pr")
+        new_pe = st.date_input("借款到期日",
+            value=date.fromisoformat(str(_C["pe"])) if isinstance(_C["pe"],str) else _C["pe"],
+            key="set_pe")
+        st.markdown("""<div style='font-size:.78rem;color:var(--amber);margin-top:4px;'>
+            ⚠ 若券商暫停質押，將借款改為 0 後儲存</div>""", unsafe_allow_html=True)
+
+    with set_c2:
+        st.markdown("#### 🎯 退休目標")
+        new_tn  = st.number_input("目標淨資產 (TWD)", min_value=1000000, value=int(_C["tn"]), step=1000000, key="set_tn")
+        new_mi  = st.number_input("每月定額投入 (TWD)", min_value=0, value=int(_C["mi"]), step=1000, key="set_mi")
+        new_wr  = st.number_input("安全提領率 (%)", 1.0, 10.0, value=float(_C["wr"]), step=0.1, format="%.1f", key="set_wr")
+        new_dob = st.date_input("出生年月日",
+            value=date.fromisoformat(str(_C["dob"])) if isinstance(_C["dob"],str) else _C["dob"],
+            min_value=date(1950,1,1), key="set_dob")
+
+        st.markdown("#### 💡 目前設定預覽")
+        st.markdown(f"""<div class="card" style='font-family:Share Tech Mono,monospace;font-size:.82rem;
+                        color:var(--muted);line-height:2.1;'>
+          006208：<span style='color:var(--cyan);'>{int(_C["s1"]):,} 股</span><br>
+          00631L：<span style='color:var(--cyan);'>{int(_C["s2"]):,} 股</span><br>
+          2330：<span style='color:var(--cyan);'>{int(_C["s3"]):,} 股</span><br>
+          質押借款：<span style='color:var(--amber);'>{fmt(int(_C["pl"]))}</span><br>
+          目標退休：<span style='color:var(--green);'>{fmtm(int(_C["tn"]))}</span>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    if st.button("💾  儲存所有設定", use_container_width=True, key="main_save"):
+        _save_cfg({
+            "s1": new_s1, "s2": new_s2, "s3": new_s3,
+            "pl": new_pl, "pr": new_pr, "pe": str(new_pe),
+            "tn": new_tn, "mi": new_mi, "wr": new_wr,
+            "dob": str(new_dob),
+        })
+        st.success("✅ 設定已儲存！請複製下方連結存為書籤以永久保存。")
+        st.rerun()
+
+    # Show the personal link
+    try:
+        current_url = f"https://project-fire-dqpqhd3xwymqialvscrznw.streamlit.app/?cfg={enc(st.session_state.cfg)}"
+    except:
+        current_url = "（儲存後即可複製）"
+
+    st.markdown(f"""
+    <div class="card" style='margin-top:12px;'>
+      <div class="lbl" style='margin-bottom:8px;'>📋 我的專屬連結（儲存為書籤 / 加入主畫面）</div>
+      <div style='background:#060d14;border:1px solid var(--border);border-radius:6px;padding:10px 14px;
+                  font-family:Share Tech Mono,monospace;font-size:.72rem;color:var(--cyan);
+                  word-break:break-all;line-height:1.6;'>
+        {current_url}
+      </div>
+      <div style='font-size:.75rem;color:var(--muted);margin-top:8px;line-height:1.8;'>
+        ① 按「💾 儲存所有設定」後連結自動更新<br>
+        ② 長按上方連結 → 複製<br>
+        ③ 用 Chrome 開啟此連結 → 右上角三點 → 新增至主畫面<br>
+        ④ 之後每次從主畫面開啟，設定都在 ✅
+      </div>
+    </div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # STRATEGY SOP
