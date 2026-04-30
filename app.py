@@ -325,6 +325,45 @@ with tabs[0]:
     pledge_ratio = (mv8/pledge_loan*100) if pledge_loan>0 else 9999
     conv_pct  = min(mv6/1_000_000*100, 100)
 
+    # Pledge settings quick edit
+    with st.expander("🏦  更新質押條件（點此展開）", expanded=False):
+        pe1, pe2, pe3, pe4 = st.columns(4)
+        with pe1:
+            q_pl = st.number_input("質押借款 (TWD)", min_value=0,
+                value=int(pledge_loan), step=10000, key="q_pl")
+        with pe2:
+            q_pr = st.number_input("質押年利率 (%)", min_value=0.0,
+                value=float(pledge_rate), step=0.1, format="%.2f", key="q_pr")
+        with pe3:
+            q_pe = st.date_input("到期日", value=pledge_expiry, key="q_pe")
+        with pe4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("💾 儲存質押", use_container_width=True, key="q_pledge_save"):
+                st.query_params.update({
+                    "s1": str(st.session_state.get("quick_s1", s_006208)),
+                    "s2": str(st.session_state.get("quick_s2", s_00631L)),
+                    "s3": str(st.session_state.get("quick_s3", s_2330)),
+                    "pl": str(q_pl), "pr": str(q_pr), "pe": str(q_pe),
+                    "tn": str(st.session_state.get("i_tn", target_net)),
+                    "mi": str(st.session_state.get("i_mi", monthly_inv)),
+                    "wr": str(st.session_state.get("i_wr", withdraw_rt)),
+                    "dob": str(st.session_state.get("i_dob", dob)),
+                    "dca": enc(st.session_state.get("dca_records", [])),
+                })
+                st.success("✅ 質押條件已儲存！")
+                st.rerun()
+        st.markdown(
+            '<div style="font-size:.75rem;color:var(--amber);margin-top:4px;">'
+            '⚠ 若券商暫停質押，可將借款歸零；質押月利息將自動更新至收入配置'
+            '</div>', unsafe_allow_html=True)
+
+    # 用 quick input 更新質押參數
+    pledge_loan  = st.session_state.get("q_pl", pledge_loan) if "q_pl" in st.session_state else pledge_loan
+    pledge_rate  = st.session_state.get("q_pr", pledge_rate) if "q_pr" in st.session_state else pledge_rate
+    pledge_expiry= st.session_state.get("q_pe", pledge_expiry) if "q_pe" in st.session_state else pledge_expiry
+    monthly_int  = pledge_loan * pledge_rate / 100 / 12
+    pledge_ratio = (mv8/pledge_loan*100) if pledge_loan>0 else 9999
+
     # Ticker Cards
     st.markdown('<div class="sec">[ 01 ]  即時報價</div>', unsafe_allow_html=True)
 
@@ -447,24 +486,12 @@ with tabs[1]:
         loan_buf  = st.number_input("還款緩衝金 (預留不投入)", min_value=0, value=500000, step=50000, key="ln_buf")
         invest_target = st.selectbox("投入標的", ["00631L（正2，高波動高報酬）","006208（穩健，低波動）","2330（台積電）"], key="ln_target")
 
-        st.markdown("#### 💼 現金流監控")
-        net_sal  = st.number_input("實領月薪", min_value=0, value=63000, step=1000, key="cf_sal")
-        rec_inv  = st.number_input("每月定期定額", min_value=0, value=38000, step=1000, key="cf_inv")
-        pl_int   = st.number_input("質押利息支出/月", min_value=0, value=round(int(monthly_int)), step=100, key="cf_pl")
-        life_min = st.number_input("最低生活費底線", min_value=0, value=15000, step=1000, key="cf_min")
-
     with lc2:
         monthly_rep = monthly_payment(loan_p, loan_r, loan_m)
         investable  = loan_p - loan_buf
         buf_months  = loan_buf / monthly_rep if monthly_rep > 0 else 0
+        total_int   = monthly_rep * loan_m - loan_p
 
-        available_cash = net_sal - rec_inv - pl_int - monthly_rep
-        cash_ok = available_cash >= life_min
-        cash_col  = "var(--green)" if cash_ok else "var(--red)"
-        cash_cls  = "card-green" if cash_ok else "card-red"
-        cash_msg  = "✅ 現金流健康" if cash_ok else f"⚠ 缺口 {fmt(life_min - available_cash)}，建議減少定額或降低借款"
-
-        # KPI row
         k1,k2,k3 = st.columns(3)
         with k1:
             st.markdown(f"""<div class="card" style='text-align:center;'>
@@ -485,30 +512,6 @@ with tabs[1]:
               <div class="sub">不靠薪水還款</div>
             </div>""", unsafe_allow_html=True)
 
-        # Cash flow monitor
-        st.markdown(f"""<div class="{cash_cls}" style='margin-top:12px;'>
-          <div class="lbl">💰 可用生活費監控</div>
-          <div style='display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin:10px 0;'>
-            <div><div class="lbl">月薪</div><div class="sml" style='color:var(--cyan);'>{fmt(net_sal)}</div></div>
-            <div><div class="lbl">定期定額</div><div class="sml" style='color:var(--amber);'>- {fmt(rec_inv)}</div></div>
-            <div><div class="lbl">質押利息</div><div class="sml" style='color:var(--amber);'>- {fmt(pl_int)}</div></div>
-            <div><div class="lbl">信貸月還款</div><div class="sml" style='color:var(--red);'>- {fmt(monthly_rep)}</div></div>
-          </div>
-          <div style='border-top:1px solid rgba(255,255,255,.1);padding-top:10px;display:flex;justify-content:space-between;align-items:center;'>
-            <div>
-              <div class="lbl">可用生活費</div>
-              <div class="med" style='color:{cash_col};'>{fmt(available_cash)}</div>
-            </div>
-            <div>
-              <div class="lbl">最低底線</div>
-              <div class="med" style='color:var(--muted);'>{fmt(life_min)}</div>
-            </div>
-            <div style='font-size:.9rem;color:{cash_col};font-weight:bold;'>{cash_msg}</div>
-          </div>
-        </div>""", unsafe_allow_html=True)
-
-        # Loan summary
-        total_int = monthly_rep * loan_m - loan_p
         st.markdown(f"""<div class="card" style='margin-top:12px;'>
           <div class="lbl">📊 借款總覽</div>
           <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;'>
@@ -803,17 +806,27 @@ with tabs[5]:
             sub2      = st.number_input("訂閱/固定", 0, value=500,   step=100,  key="sal2_sub")
             food2     = st.number_input("飲食/日常", 0, value=8000,  step=500,  key="sal2_food")
             fun2      = st.number_input("娛樂/聚餐", 0, value=6000,  step=500,  key="sal2_fun")
+            st.markdown("---")
+            st.markdown("##### 🏦 借款還款（有才填）")
+            pledge_repay2 = st.number_input("質押月還款（若券商要求還款）", 0, value=0, step=1000, key="sal2_pl_repay",
+                                             help="若券商暫停質押業務，需要還款時填入每月還款額")
+            loan_repay2   = st.number_input("信貸月還款（有貸款才填）", 0, value=0, step=1000, key="sal2_loan_repay",
+                                             help="若有信貸，填入每月本息攤還額")
         with ic2:
             rigid2=rent2+ins2+phone2+sub2; living2=food2+fun2
-            out2=dca_a+rigid2+living2+round(monthly_int)
+            pledge_int2 = round(monthly_int) if pledge_repay2 == 0 else pledge_repay2
+            out2=dca_a+rigid2+living2+pledge_int2+loan_repay2
             sur2=net_sal2-out2; sc_="var(--green)" if sur2>=0 else "var(--red)"
             up2=min(out2/net_sal2*100,100) if net_sal2 else 0
             items2=[("📈 定期定額",dca_a,"var(--green)","複利引擎"),
                     ("🏠 剛性支出",rigid2,"var(--red)",f"房{rent2:,} 險{ins2:,} 電{phone2:,} 訂{sub2:,}"),
                     ("🛒 生活費",living2,"var(--cyan)",f"食{food2:,} 樂{fun2:,}"),
-                    ("🏦 質押息",round(monthly_int),"#ff7799",f"{pledge_rate:.2f}%")]
+                    ("🏦 質押/還款",pledge_int2,"#ff7799",
+                     "月息" if pledge_repay2==0 else "還款中"),
+                    *([("💳 信貸還款",loan_repay2,"var(--purple)",f"月還 {fmt(loan_repay2)}")] if loan_repay2>0 else [])]
             rows2=""
             for n,a,c,nt in items2:
+                if a == 0: continue
                 pp=a/net_sal2*100 if net_sal2 else 0
                 rows2+=f"""<tr style='border-bottom:1px solid var(--border);'>
                   <td style='padding:9px 12px;font-size:.9rem;color:{c};'>{n}</td>
@@ -821,7 +834,15 @@ with tabs[5]:
                   <td style='padding:9px 12px;font-family:Share Tech Mono,monospace;font-size:.82rem;color:var(--muted);text-align:right;'>{pp:.1f}%</td>
                   <td style='padding:9px 12px;font-size:.75rem;color:var(--dim);'>{nt}</td>
                 </tr>"""
-            adv="💡 結餘建議加碼" if sur2>0 else f"⚠ 超支 {fmt(abs(sur2))}"
+            adv="💡 結餘建議加碼 00631L" if sur2>0 else f"⚠ 超支 {fmt(abs(sur2))}，建議減少定額"
+            # Pledge repayment warning
+            if pledge_repay2 > 0:
+                st.markdown(f"""<div class="card-amber" style='margin-bottom:10px;padding:12px 16px;'>
+                  <div style='font-size:.85rem;color:var(--amber);'>
+                    ⚠ 質押還款模式：每月需額外還 {fmt(pledge_repay2)}，共需還清 {fmt(pledge_loan)}，
+                    約需 {pledge_loan//pledge_repay2 if pledge_repay2>0 else 0} 個月
+                  </div>
+                </div>""", unsafe_allow_html=True)
             st.markdown(f"""<div class="card">
               <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;'>
                 <div><div class="lbl">月薪</div><div class="med" style='color:var(--cyan);'>{fmt(net_sal2)}</div></div>
